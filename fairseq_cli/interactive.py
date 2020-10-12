@@ -22,7 +22,7 @@ import torch
 from fairseq import checkpoint_utils, distributed_utils, options, tasks, utils
 from fairseq.data import encoders
 from fairseq.token_generation_constraints import pack_constraints, unpack_constraints
-from .generate import get_symbols_to_strip_from_output
+from fairseq_cli.generate import get_symbols_to_strip_from_output
 
 logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
@@ -86,7 +86,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
     itr = task.get_batch_iterator(
         dataset=task.build_dataset_for_inference(tokens, lengths, constraints=constraints_tensor),
         max_tokens=args.max_tokens,
-        max_sentences=args.max_sentences,
+        max_sentences=args.batch_size,
         max_positions=max_positions,
         ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test
     ).next_epoch_itr(shuffle=False)
@@ -112,13 +112,13 @@ def main(args):
 
     if args.buffer_size < 1:
         args.buffer_size = 1
-    if args.max_tokens is None and args.max_sentences is None:
-        args.max_sentences = 1
+    if args.max_tokens is None and args.batch_size is None:
+        args.batch_size = 1
 
     assert not args.sampling or args.nbest == args.beam, \
         '--sampling requires --nbest to be equal to --beam'
-    assert not args.max_sentences or args.max_sentences <= args.buffer_size, \
-        '--max-sentences/--batch-size cannot be larger than --buffer-size'
+    assert not args.batch_size or args.batch_size <= args.buffer_size, \
+        '--batch-size cannot be larger than --buffer-size'
 
     logger.info(args)
 
@@ -139,6 +139,8 @@ def main(args):
         arg_overrides=eval(args.model_overrides),
         task=task,
         suffix=getattr(args, "checkpoint_suffix", ""),
+        strict=(args.checkpoint_shard_count == 1),
+        num_shards=args.checkpoint_shard_count,
     )
 
     # Set dictionaries
@@ -147,11 +149,11 @@ def main(args):
 
     # Optimize ensemble for generation
     for model in models:
-        model.prepare_for_inference_(args)
         if args.fp16:
             model.half()
-        if use_cuda:
+        if use_cuda and not args.pipeline_model_parallel:
             model.cuda()
+        model.prepare_for_inference_(args)
 
     # Initialize generator
     generator = task.build_generator(models, args)

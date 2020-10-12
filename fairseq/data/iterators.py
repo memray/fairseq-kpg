@@ -251,6 +251,21 @@ class EpochBatchIterator(EpochBatchIterating):
             self._frozen_batches = tuple(self.batch_sampler(self.dataset, self.epoch))
         return self._frozen_batches
 
+    @property
+    def first_batch(self):
+        if len(self.frozen_batches) == 0:
+            raise Exception(
+                "The dataset is empty. This could indicate "
+                "that all elements in the dataset have been skipped. "
+                "Try increasing the max number of allowed tokens or using "
+                "a larger dataset."
+            )
+
+        if self.dataset.supports_fetch_outside_dataloader:
+            return self.collate_fn([self.dataset[i] for i in self.frozen_batches[0]])
+        else:
+            return "DUMMY"
+
     def __len__(self):
         return int(math.ceil(len(self.frozen_batches) / float(self.num_shards)))
 
@@ -521,8 +536,6 @@ class BufferedIterator(object):
         # Propagate this change to the underlying iterator
         if hasattr(self._iterable, "take"):
             self._iterable.take(n)
-        else:
-            self._iterable = itertools.islice(self._iterable, n)
 
     def __next__(self):
         # Create consumer if not created yet

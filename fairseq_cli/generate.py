@@ -7,6 +7,8 @@
 Translate pre-processed data with a trained model.
 """
 
+import ast
+from itertools import chain
 import logging
 import math
 import os
@@ -56,7 +58,7 @@ def _main(args, output_file):
 
     utils.import_user_module(args)
 
-    if args.max_tokens is None and args.max_sentences is None:
+    if args.max_tokens is None and args.batch_size is None:
         args.max_tokens = 12000
     logger.info(args)
 
@@ -78,22 +80,46 @@ def _main(args, output_file):
         src_dict = None
     tgt_dict = task.target_dictionary
 
+    overrides = ast.literal_eval(args.model_overrides)
+
     # Load ensemble
     logger.info('loading model(s) from {}'.format(args.path))
     models, _model_args = checkpoint_utils.load_model_ensemble(
         utils.split_paths(args.path),
-        arg_overrides=eval(args.model_overrides),
+        arg_overrides=overrides,
         task=task,
         suffix=getattr(args, "checkpoint_suffix", ""),
+        strict=(args.checkpoint_shard_count == 1),
+        num_shards=args.checkpoint_shard_count,
     )
 
+    if args.lm_path is not None:
+        overrides['data'] = args.data
+
+        try:
+            lms, _ = checkpoint_utils.load_model_ensemble(
+                [args.lm_path],
+                arg_overrides=overrides,
+                task=None,
+            )
+        except:
+            logger.warning(f"Failed to load language model! Please make sure that the language model dict is the same "
+                           f"as target dict and is located in the data dir ({args.data})")
+            raise
+
+        assert len(lms) == 1
+    else:
+        lms = [None]
+
     # Optimize ensemble for generation
-    for model in models:
-        model.prepare_for_inference_(args)
+    for model in chain(models, lms):
+        if model is None:
+            continue
         if args.fp16:
             model.half()
-        if use_cuda:
+        if use_cuda and not args.pipeline_model_parallel:
             model.cuda()
+        model.prepare_for_inference_(args)
 
     # Load alignment dictionary for unknown word replacement
     # (None if no unknown word replacement, empty if no path to align dictionary)
@@ -103,7 +129,7 @@ def _main(args, output_file):
     itr = task.get_batch_iterator(
         dataset=task.dataset(args.gen_subset),
         max_tokens=args.max_tokens,
-        max_sentences=args.max_sentences,
+        max_sentences=args.batch_size,
         max_positions=utils.resolve_max_positions(
             task.max_positions(),
             *[model.max_positions() for model in models]
@@ -124,7 +150,12 @@ def _main(args, output_file):
 
     # Initialize generator
     gen_timer = StopwatchMeter()
-    generator = task.build_generator(models, args)
+
+    extra_gen_cls_kwargs = {
+        'lm_model': lms[0],
+        'lm_weight': args.lm_weight
+    }
+    generator = task.build_generator(models, args, extra_gen_cls_kwargs=extra_gen_cls_kwargs)
 
     # Handle tokenization and BPE
     tokenizer = encoders.build_tokenizer(args)
@@ -269,9 +300,11 @@ def _main(args, output_file):
     if has_target:
         if args.bpe and not args.sacrebleu:
             if args.remove_bpe:
-                logger.warning("BLEU score is being computed by splitting detokenized string on spaces, this is probably not what you want. Use --sacrebleu for standard 13a BLEU tokenization")
+                logger.warning(
+                    "BLEU score is being computed by splitting detokenized string on spaces, this is probably not what you want. Use --sacrebleu for standard 13a BLEU tokenization")
             else:
-                logger.warning("If you are using BPE on the target side, the BLEU score is computed on BPE tokens, not on proper words.  Use --sacrebleu for standard 13a BLEU tokenization")
+                logger.warning(
+                    "If you are using BPE on the target side, the BLEU score is computed on BPE tokens, not on proper words.  Use --sacrebleu for standard 13a BLEU tokenization")
         # use print to be consistent with other main outputs: S-, H-, T-, D- and so on
         print(
             'Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, scorer.result_string()),

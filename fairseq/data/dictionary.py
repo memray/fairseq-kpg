@@ -27,7 +27,7 @@ class Dictionary(object):
         unk="<unk>",
         extra_special_symbols=None,
     ):
-        self.unk_word, self.pad_word, self.eos_word = unk, pad, eos
+        self.bos_word, self.unk_word, self.pad_word, self.eos_word = bos, unk, pad, eos
         self.symbols = []
         self.count = []
         self.indices = {}
@@ -221,7 +221,7 @@ class Dictionary(object):
         """
         if isinstance(f, str):
             try:
-                with PathManager.open(f, "r", encoding="utf-8") as fd:
+                with open(PathManager.get_local_path(f), "r", encoding="utf-8") as fd:
                     self.add_from_file(fd)
             except FileNotFoundError as fnfe:
                 raise fnfe

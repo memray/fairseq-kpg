@@ -9,8 +9,7 @@ import logging
 import os
 from collections import OrderedDict, defaultdict
 
-import numpy as np
-from fairseq import options, utils
+from fairseq import utils
 from fairseq.data import (
     AppendTokenDataset,
     ConcatDataset,
@@ -25,23 +24,19 @@ from fairseq.data import (
     data_utils,
     indexed_dataset,
 )
+from fairseq.data.multilingual.multilingual_utils import (
+    EncoderLangtok,
+    LangTokSpec,
+    LangTokStyle,
+    augment_dictionary,
+    get_lang_tok,
+)
 from fairseq.data.multilingual.sampled_multi_dataset import CollateFormat
 from fairseq.file_io import PathManager
-from fairseq.options import csv_str_list, eval_str_dict
+from fairseq.utils import FileContentsAction, csv_str_list, eval_str_dict
 
 
 logger = logging.getLogger(__name__)
-
-
-def _lang_token(lang: str, style="__{}__"):
-    return style.format(lang)
-
-
-def _lang_token_index(dic: Dictionary, lang: str, style="__{}__"):
-    """Return language token index."""
-    idx = dic.index(_lang_token(lang, style))
-    assert idx != dic.unk_index, "cannot find language token for lang {}".format(lang)
-    return idx
 
 
 def _lang_id(dic: Dictionary, lang: str):
@@ -84,6 +79,7 @@ class MultilingualDatasetManager(object):
             "data",
             help="colon separated path to data directories list, \
                             will be iterated upon during epochs in round-robin manner",
+            action=FileContentsAction,
         )
         parser.add_argument(
             "--langs",
@@ -91,6 +87,7 @@ class MultilingualDatasetManager(object):
             type=csv_str_list,
             help="a list of languages comma sperated languages which can appear in lang-pairs; "
             "note that the ordering determines language token IDs",
+            action=FileContentsAction,
         )
         parser.add_argument(
             "--lang-dict",
@@ -103,9 +100,9 @@ class MultilingualDatasetManager(object):
         )
         parser.add_argument(
             "--lang-tok-style",
-            default="multilingual",
+            default=LangTokStyle.multilingual.value,
             type=str,
-            choices=["multilingual", "mbart"],
+            choices=[LangTokStyle.multilingual.value, LangTokStyle.mbart.value],
             help="language token styles",
         )
 
@@ -158,7 +155,7 @@ class MultilingualDatasetManager(object):
             "--encoder-langtok",
             default=None,
             type=str,
-            choices=["src", "tgt"],
+            choices=[EncoderLangtok.src.value, EncoderLangtok.tgt.value],
             metavar="SRCTGT",
             help="prepend to the beginning of source sentence the source or target "
             "language token. (src/tgt)",
@@ -199,12 +196,18 @@ class MultilingualDatasetManager(object):
             default=None,
         )
         parser.add_argument(
+            "--fixed-dictionary",
+            help='Fixed dictionary to use with model path',
+            default=None,
+            type=str,
+        )
+        parser.add_argument(
             "--langtoks-specs",
             help='a list of comma separated data types that a set of language tokens to be specialized for, \
                             e.g. "main,dae,mined". There will be a set of language tokens added to the vocab to \
                             distinguish languages in different training data types. If not specified, default language \
                             tokens per languages will be added',
-            default="main",
+            default=LangTokSpec.main.value,
             type=csv_str_list,
         )
         parser.add_argument(
@@ -263,7 +266,7 @@ class MultilingualDatasetManager(object):
             langs = sorted(langs)
             logger.info(f"inferred language list: {langs}")
         elif args.lang_dict:
-            with PathManager.open(args.lang_dict, "r", encoding="utf-8") as f:
+            with open(PathManager.get_local_path(args.lang_dict), "r", encoding="utf-8") as f:
                 langs = [lang.strip() for lang in f.readlines() if lang.strip()]
                 logger.info(
                     f"loaded language list from {args.lang_dict} as they are ordered in file"
@@ -320,9 +323,9 @@ class MultilingualDatasetManager(object):
             training = False
         else:
             training = True
-        sorted_langs = cls.load_langs(args, **kargs)
+        language_list = cls.load_langs(args, **kargs)
         check_langs(
-            sorted_langs,
+            language_list,
             (
                 [p.split("-") for p in args.lang_pairs]
                 if training
@@ -346,33 +349,28 @@ class MultilingualDatasetManager(object):
             langs_to_load_dicts = sorted([args.source_lang, args.target_lang])
 
         dicts = OrderedDict()
-        supported_langtok_specs = args.langtoks_specs
+        paths = utils.split_paths(args.data)
+        assert len(paths) > 0
         for lang in langs_to_load_dicts:
-            paths = utils.split_paths(args.data)
-            assert len(paths) > 0
-            dicts[lang] = load_dictionary(
-                os.path.join(paths[0], "dict.{}.txt".format(lang))
-            )
+            if args.fixed_dictionary is not None:
+                dicts[lang] = load_dictionary(args.fixed_dictionary)
+            else:
+                dicts[lang] = load_dictionary(
+                    os.path.join(paths[0], "dict.{}.txt".format(lang))
+                )
+                augment_dictionary(
+                    dictionary=dicts[lang],
+                    language_list=language_list,
+                    lang_tok_style=args.lang_tok_style,
+                    langtoks_specs=args.langtoks_specs,
+                    extra_data=args.extra_data,
+                )
             if len(dicts) > 0:
                 assert dicts[lang].pad() == dicts[langs_to_load_dicts[0]].pad()
                 assert dicts[lang].eos() == dicts[langs_to_load_dicts[0]].eos()
                 assert dicts[lang].unk() == dicts[langs_to_load_dicts[0]].unk()
-
-            # keep the langs consistent for all experiments with the same lang dict
-            # for finetuning regardless of whether lang_tok is required or not just add the tokens to the dicts
-            for spec in supported_langtok_specs:
-                for lang_to_add in sorted_langs:
-                    dicts[lang].add_symbol(
-                        MultilingualDatasetManager.get_lang_tok(lang_to_add, args, spec)
-                    )
-            if args.lang_tok_style == "mbart" or (
-                args.extra_data and "mono_dae" in args.extra_data
-            ):
-                dicts[lang].add_symbol("<mask>")
             logger.info("[{}] dictionary: {} types".format(lang, len(dicts[lang])))
-        return sorted_langs, dicts, training
-
-    TOKEN_STYLES = {"mbart": "[{}]", "multilingual": "__{}__"}
+        return language_list, dicts, training
 
     @classmethod
     def create_lang_dictionary(cls, langs):
@@ -382,20 +380,6 @@ class MultilingualDatasetManager(object):
         for lang in langs:
             lang_dict.add_symbol(lang)
         return lang_dict
-
-    @classmethod
-    def get_lang_tok_style(cls, args):
-        return cls.TOKEN_STYLES[args.lang_tok_style]
-
-    @classmethod
-    def get_lang_tok(cls, lang, args, spec=""):
-        if spec is None:
-            return None
-        if spec.endswith("dae"):
-            lang = f"{lang}_dae"
-        elif spec.endswith("mined"):
-            lang = f"{lang}_mined"
-        return _lang_token(lang, cls.get_lang_tok_style(args))
 
     @classmethod
     def get_langtok_index(cls, lang_tok, dic):
@@ -411,11 +395,15 @@ class MultilingualDatasetManager(object):
         if spec and spec.startswith("src"):
             if src_lang is None:
                 return None
-            langtok = self.get_lang_tok(src_lang, self.args, spec)
+            langtok = get_lang_tok(
+                lang=src_lang, lang_tok_style=self.args.lang_tok_style, spec=spec
+            )
         else:
             if tgt_lang is None:
                 return None
-            langtok = self.get_lang_tok(tgt_lang, self.args, spec)
+            langtok = get_lang_tok(
+                lang=tgt_lang, lang_tok_style=self.args.lang_tok_style, spec=spec
+            )
         return self.get_langtok_index(
             langtok, self.dicts[src_lang if src_lang else tgt_lang]
         )
@@ -423,7 +411,9 @@ class MultilingualDatasetManager(object):
     def get_decoder_langtok(self, tgt_lang, spec=None):
         if spec is None:
             return None
-        langtok = self.get_lang_tok(tgt_lang, self.args, spec)
+        langtok = get_lang_tok(
+            lang=tgt_lang, lang_tok_style=self.args.lang_tok_style, spec=spec
+        )
         return self.get_langtok_index(langtok, self.dicts[tgt_lang])
 
     @classmethod
@@ -435,39 +425,6 @@ class MultilingualDatasetManager(object):
     def split_exists(cls, split, src, tgt, lang, data_path, dataset_impl):
         filename = os.path.join(data_path, "{}.{}-{}.{}".format(split, src, tgt, lang))
         return indexed_dataset.dataset_exists(filename, impl=dataset_impl)
-
-    @classmethod
-    def mono_split_exists(cls, split, lang, data_path, dataset_impl):
-        filename = os.path.join(data_path, "{}.{}".format(split, lang))
-        return indexed_dataset.dataset_exists(filename, impl=dataset_impl)
-
-    @classmethod
-    def bitext_split_exists(cls, split, src, tgt, data_path, dataset_impl):
-        src_exists = cls.split_exists(
-            split, src, tgt, lang=src, data_path=data_path, dataset_impl=dataset_impl
-        ) or cls.split_exists(
-            split, tgt, src, lang=src, data_path=data_path, dataset_impl=dataset_impl
-        )
-        # check source exists to determine shard number
-        # also note that during inference time target is not required
-        # so checking target will fail inference time data loading
-        return src_exists
-
-    @classmethod
-    def get_split_num_shards(cls, split, src, tgt, data_paths, dataset_impl):
-        return sum(
-            1
-            for path in data_paths
-            if cls.bitext_split_exists(split, src, tgt, path, dataset_impl)
-        )
-
-    @classmethod
-    def get_mono_split_num_shards(cls, split, lang, data_paths, dataset_impl):
-        return sum(
-            1
-            for path in data_paths
-            if cls.mono_split_exists(split, lang, path, dataset_impl)
-        )
 
     def load_lang_dataset(
         self,
@@ -834,6 +791,21 @@ class MultilingualDatasetManager(object):
     def get_dataset_key(cls, data_category, src, tgt):
         return f"{data_category}:{src}-{tgt}"
 
+    @classmethod
+    def _get_shard_num_dict(cls, split, paths):
+        shards = defaultdict(int)
+        for path in paths:
+            files = PathManager.ls(path)
+            directions = set()
+            for f in files:
+                if f.startswith(split) and f.endswith(".idx"):
+                    # idx files of the form "{split}.{src}-{tgt}.{lang}.idx"
+                    direction = f.split('.')[-3]
+                    directions.add(direction)
+            for direction in directions:
+                shards[direction] += 1
+        return shards
+
     def get_split_num_data_shards(self, split):
         if split in self._num_shards_dict:
             return self._num_shards_dict[split]
@@ -844,24 +816,26 @@ class MultilingualDatasetManager(object):
             if data_category not in lang_pairs:
                 continue
             paths = utils.split_paths(paths)
+            shards_dict = self._get_shard_num_dict(split, paths)
             lang_dirs = [
                 lang_pair.split("-") for lang_pair in lang_pairs[data_category]
             ]
             lang_dirs = [x if len(x) > 1 else (x[0], x[0]) for x in lang_dirs]
             for src, tgt in lang_dirs:
-                # monolingual data ruqires tgt only
-                assert src is not None or "mono_" in data_category, (
-                    f"error: src={src}, " "tgt={tgt} for data_category={data_category}"
-                )
                 key = self.get_dataset_key(data_category, src, tgt)
                 if "mono_" in data_category:
-                    num_shards_dict[key] = self.get_mono_split_num_shards(
-                        split, tgt, paths, self.args.dataset_impl
+                    # monolingual data requires tgt only
+                    assert src is None or src == tgt, (
+                        f"error: src={src}, "
+                        "tgt={tgt} for data_category={data_category}"
                     )
+                    num_shards_dict[key] = shards_dict[tgt]
                 else:
-                    num_shards_dict[key] = self.get_split_num_shards(
-                        split, src, tgt, paths, self.args.dataset_impl
-                    )
+                    if f"{src}-{tgt}" in shards_dict:
+                        num_shards_dict[key] = shards_dict[f"{src}-{tgt}"]
+                    elif f"{tgt}-{src}" in shards_dict:
+                        # follow the fairseq tradition to use reversed direction data if it is not available
+                        num_shards_dict[key] = shards_dict[f"{tgt}-{src}"]
         self._num_shards_dict[split] = num_shards_dict
         logger.info(f"[{split}] num of shards: {num_shards_dict}")
         return num_shards_dict
@@ -930,7 +904,9 @@ class MultilingualDatasetManager(object):
                 )
         return param_list
 
-    def get_train_dataset_sizes(self, data_param_list, datasets, epoch, shard_epoch=None):
+    def get_train_dataset_sizes(
+        self, data_param_list, datasets, epoch, shard_epoch=None
+    ):
         num_shards = [
             self.get_split_num_data_shards(param["split"])[param["key"]]
             for param in data_param_list
@@ -958,8 +934,12 @@ class MultilingualDatasetManager(object):
         )
         return [s for _, s in data_sizes]
 
-    def get_train_sampling_ratios(self, data_param_list, datasets, epoch=1, shard_epoch=None):
-        data_sizes = self.get_train_dataset_sizes(data_param_list, datasets, epoch, shard_epoch)
+    def get_train_sampling_ratios(
+        self, data_param_list, datasets, epoch=1, shard_epoch=None
+    ):
+        data_sizes = self.get_train_dataset_sizes(
+            data_param_list, datasets, epoch, shard_epoch
+        )
         sampling_func = self.sampling_method.sampling_method_selector()
         sample_ratios = sampling_func(data_sizes) if sampling_func is not None else None
         return sample_ratios

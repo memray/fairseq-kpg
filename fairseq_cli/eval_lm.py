@@ -77,6 +77,8 @@ def main(parsed_args, **unused_kwargs):
         arg_overrides=eval(parsed_args.model_overrides),
         task=task,
         suffix=getattr(parsed_args, "checkpoint_suffix", ""),
+        strict=(parsed_args.checkpoint_shard_count == 1),
+        num_shards=parsed_args.checkpoint_shard_count,
     )
 
     for arg in vars(parsed_args).keys():
@@ -104,11 +106,11 @@ def main(parsed_args, **unused_kwargs):
 
     # Optimize ensemble for generation and set the source and dest dicts on the model (required by scorer)
     for model in models:
-        model.prepare_for_inference_(args)
         if args.fp16:
             model.half()
-        if use_cuda:
+        if use_cuda and not args.pipeline_model_parallel:
             model.cuda()
+        model.prepare_for_inference_(args)
 
     assert len(models) > 0
 
@@ -117,7 +119,7 @@ def main(parsed_args, **unused_kwargs):
     itr = task.get_batch_iterator(
         dataset=dataset,
         max_tokens=args.max_tokens or 36000,
-        max_sentences=args.max_sentences,
+        max_sentences=args.batch_size,
         max_positions=utils.resolve_max_positions(*[
             model.max_positions() for model in models
         ]),

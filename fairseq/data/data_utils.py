@@ -32,10 +32,13 @@ def infer_language_pair(path):
     return src, dst
 
 
-def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False, pad_to_length=None):
+def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False,
+                   pad_to_length=None, pad_to_multiple=1):
     """Convert a list of 1d tensors into a padded 2d tensor."""
     size = max(v.size(0) for v in values)
     size = size if pad_to_length is None else max(size, pad_to_length)
+    if pad_to_multiple != 1 and size % pad_to_multiple != 0:
+        size = int(((size-0.1)//pad_to_multiple + 1) * pad_to_multiple)
     res = values[0].new(len(values), size).fill_(pad_idx)
 
     def copy_tensor(src, dst):
@@ -71,15 +74,14 @@ def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False
     """
     from fairseq.data.concat_dataset import ConcatDataset
     import fairseq.data.indexed_dataset as indexed_dataset
-
     datasets = []
     for k in itertools.count():
         path_k = path + (str(k) if k > 0 else '')
+        path_k = indexed_dataset.get_indexed_dataset_to_local(path_k)
 
         dataset_impl_k = dataset_impl
         if dataset_impl_k is None:
             dataset_impl_k = indexed_dataset.infer_dataset_impl(path_k)
-
         dataset = indexed_dataset.make_dataset(
             path_k,
             impl=dataset_impl_k or default,
@@ -438,7 +440,9 @@ def compute_mask_indices(
 
 
 def get_mem_usage():
-    # for debug
-    import psutil
-    mb = 1024 * 1024
-    return f'used={psutil.virtual_memory().used / mb}Mb; avail={psutil.virtual_memory().available / mb}Mb'
+    try:
+        import psutil
+        mb = 1024 * 1024
+        return f'used={psutil.virtual_memory().used / mb}Mb; avail={psutil.virtual_memory().available / mb}Mb'
+    except ImportError:
+        return 'N/A'
