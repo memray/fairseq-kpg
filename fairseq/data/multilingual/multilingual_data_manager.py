@@ -6,6 +6,7 @@
 import itertools
 import json
 import logging
+import math
 import os
 from collections import OrderedDict, defaultdict
 
@@ -196,7 +197,7 @@ class MultilingualDatasetManager(object):
         )
         parser.add_argument(
             "--fixed-dictionary",
-            help='Fixed dictionary to use with model path',
+            help="Fixed dictionary to use with model path",
             default=None,
             type=str,
         )
@@ -265,7 +266,9 @@ class MultilingualDatasetManager(object):
             langs = sorted(langs)
             logger.info(f"inferred language list: {langs}")
         elif args.lang_dict:
-            with open(PathManager.get_local_path(args.lang_dict), "r", encoding="utf-8") as f:
+            with open(
+                PathManager.get_local_path(args.lang_dict), "r", encoding="utf-8"
+            ) as f:
                 langs = [lang.strip() for lang in f.readlines() if lang.strip()]
                 logger.info(
                     f"loaded language list from {args.lang_dict} as they are ordered in file"
@@ -286,6 +289,17 @@ class MultilingualDatasetManager(object):
         return not (self.args.extra_data and "mono_dae" in self.args.extra_data) and (
             not self.args.lang_tok_replacing_bos_eos
         )
+
+    def estimate_global_pass_epoch(self, epoch):
+        if self.args.virtual_epoch_size is None or self.args.virtual_data_size is None:
+            return None
+        # one epoch more for remaining data in each shard
+        virtual_epochs_per_shard = math.ceil(
+            self.args.virtual_data_size / self.args.virtual_epoch_size
+        )
+        # note that fairseq epoch / shard_epoch starts from 1
+        shard_epoch = (epoch - 1) // virtual_epochs_per_shard + 1
+        return shard_epoch
 
     @classmethod
     def prepare(cls, load_dictionary, args, **kargs):
@@ -799,7 +813,7 @@ class MultilingualDatasetManager(object):
             for f in files:
                 if f.startswith(split) and f.endswith(".idx"):
                     # idx files of the form "{split}.{src}-{tgt}.{lang}.idx"
-                    direction = f.split('.')[-3]
+                    direction = f.split(".")[-3]
                     directions.add(direction)
             for direction in directions:
                 shards[direction] += 1

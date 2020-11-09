@@ -2,15 +2,16 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+"""isort:skip_file"""
 
 import argparse
 import importlib
 import os
-from argparse import Namespace
-from typing import Union
 
 import fairseq
 from fairseq.dataclass import FairseqDataclass
+from fairseq.dataclass.utils import merge_with_parent
+from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig, OmegaConf
 
 from .composite_encoder import CompositeEncoder
@@ -51,10 +52,37 @@ __all__ = [
 ]
 
 
-def build_model(model_cfg: Union[DictConfig, Namespace], task):
-    if isinstance(model_cfg, DictConfig):
-        return ARCH_MODEL_REGISTRY[model_cfg._name].build_model(model_cfg, task)
-    return ARCH_MODEL_REGISTRY[model_cfg.arch].build_model(model_cfg, task)
+def build_model(cfg: DictConfig, task):
+
+    model = None
+    model_type = getattr(cfg, "_name", None) or getattr(cfg, "arch", None)
+
+    if not model_type and len(cfg) == 1:
+        # this is hit if config object is nested in directory that is named after model type
+
+        model_type = next(iter(cfg))
+        if model_type in MODEL_DATACLASS_REGISTRY:
+            cfg = cfg[model_type]
+        else:
+            raise Exception(
+                "Could not infer model type from directory. Please add _name field to indicate model type"
+            )
+
+    if model_type in ARCH_MODEL_REGISTRY:
+        # case 1: legacy models
+        model = ARCH_MODEL_REGISTRY[model_type]
+    elif model_type in MODEL_DATACLASS_REGISTRY:
+        # case 2: config-driven models
+        model = MODEL_REGISTRY[model_type]
+
+    if model_type in MODEL_DATACLASS_REGISTRY:
+        # set defaults from dataclass. note that arch name and model name can be the same
+        dc = MODEL_DATACLASS_REGISTRY[model_type]
+        cfg = merge_with_parent(dc(), cfg)
+
+    assert model is not None, f"Could not infer model type from {cfg}"
+
+    return model.build_model(cfg, task)
 
 
 def register_model(name, dataclass=None):
@@ -91,7 +119,13 @@ def register_model(name, dataclass=None):
             )
 
         cls.__dataclass = dataclass
-        MODEL_DATACLASS_REGISTRY[name] = dataclass
+        if dataclass is not None:
+            MODEL_DATACLASS_REGISTRY[name] = dataclass
+
+            cs = ConfigStore.instance()
+            node = dataclass()
+            node._name = name
+            cs.store(name=name, group="model", node=node, provider="fairseq")
         return cls
 
     return register_model_cls
@@ -107,14 +141,13 @@ def register_model_architecture(model_name, arch_name):
     For example::
 
         @register_model_architecture('lstm', 'lstm_luong_wmt_en_de')
-        def lstm_luong_wmt_en_de(args):
-            args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 1000)
+        def lstm_luong_wmt_en_de(cfg):
+            args.encoder_embed_dim = getattr(cfg.model, 'encoder_embed_dim', 1000)
             (...)
 
-    The decorated function should take a single argument *args*, which is a
-    :class:`argparse.Namespace` of arguments parsed from the command-line. The
-    decorated function should modify these arguments in-place to match the
-    desired architecture.
+    The decorated function should take a single argument *cfg*, which is a
+    :class:`omegaconf.DictConfig`. The decorated function should modify these
+    arguments in-place to match the desired architecture.
 
     Args:
         model_name (str): the name of the Model (Model must already be
