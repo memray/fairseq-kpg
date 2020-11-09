@@ -58,7 +58,7 @@ def collate(
         return 1. / align_weights.float()
 
     id = torch.LongTensor([s['id'] for s in samples])
-    src_tokens = merge(
+    src_tokens = merge( # [BS x max_len]
         'source', left_pad=left_pad_source,
         pad_to_length=pad_to_length['source'] if pad_to_length is not None else None
     )
@@ -104,6 +104,7 @@ def collate(
         'net_input': {
             'src_tokens': src_tokens,
             'src_lengths': src_lengths,
+            'tgt_tokens': target,
         },
         'target': target,
     }

@@ -21,7 +21,6 @@ from fairseq.modules.transformer_sentence_encoder import init_bert_params
 
 class NegativeDistanceScore(object):
     def __init__(self):
-
         # pre-compute some values
         self.scores = {}
 
@@ -73,10 +72,13 @@ def _get_ins_targets(in_tokens, out_tokens, padding_idx, unk_idx, vocab_size, ta
             [t for t in s if t != padding_idx]
             for i, s in enumerate(out_tokens.tolist())
         ]
-
+    # full_labels[:-1] is the insertion sequences, has len(in_tokens_list)+1 elements, i-th element is a list of tokens
+    #       indicating those tokens can be inserted to i-th position of in_tokens_list, otherwise it's [padding_idx].
+    # full_labels[-1] is the delete sequence.
     full_labels = libnat.suggested_ed2_path(
         in_tokens_list, out_tokens_list, padding_idx
     )
+    # only considers insertion ops
     insert_labels = [a[:-1] for a in full_labels]
 
     # numericalize1
@@ -85,7 +87,7 @@ def _get_ins_targets(in_tokens, out_tokens, padding_idx, unk_idx, vocab_size, ta
         *[
             (w + (j + i * (T - 1)) * V, neg_scorer(k, len(label), tau))
             for i, labels in enumerate(insert_labels)
-            for j, label in enumerate(labels[1:-1])
+            for j, label in enumerate(labels[1:-1]) # we move the last element to the 1st,
             for k, w in enumerate(label)
         ]
     )  # HACK 1:-1
@@ -137,16 +139,28 @@ class InsertionTransformerModel(LevenshteinTransformerModel):
     def forward(
         self, src_tokens, src_lengths, prev_output_tokens, tgt_tokens, **kwargs
     ):
+        '''
+
+        :param src_tokens: B x src_len
+        :param src_lengths: actual length of each source seq, a list of length B
+        :param prev_output_tokens: B x tgt_len, used as the input to decoder
+        :param tgt_tokens: B x tgt_len, used as the target output of decoder, prev_output_tokens[t+1] == tgt_tokens[t]
+        :param kwargs:
+        :return:
+        '''
 
         assert tgt_tokens is not None, "forward function only supports training."
 
-        # encoding
+        # encoding of source:
+        #   1. encoder_out - T (max_src_len) x B x C;
+        #   2. encoder_padding_mask - B x T;
+        #   3. encoder_embedding - B x T x C
         encoder_out = self.encoder(src_tokens, src_lengths=src_lengths, **kwargs)
 
-        # generate training labels for insertion
+        # generate training labels for insertion, (B, tgt_len-1, V)
         word_ins_out = self.decoder.forward_word_ins(
             normalize=False,
-            prev_output_tokens=prev_output_tokens,
+            prev_output_tokens=prev_output_tokens, # B x tgt_len
             encoder_out=encoder_out
         )
 
@@ -223,7 +237,9 @@ class InsertionTransformerDecoder(LevenshteinTransformerDecoder):
 
     @ensemble_decoder
     def forward_word_ins(self, normalize, encoder_out, prev_output_tokens):
+        # target sequence encoding of shape `(B, tgt_len, D)`
         features = self.extract_features(prev_output_tokens, encoder_out=encoder_out)[0]
+        # pool(cat(tgt_encoding[0:tgt_len-1], tgt_encoding[1:tgt_len])) -> (B, tgt_len-1, D*2)
         features = self.pool_out(
             torch.cat([features[:, :-1, :], features[:, 1:, :]], 2)
         )

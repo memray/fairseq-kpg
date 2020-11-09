@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 from functools import lru_cache
-import os
 import shutil
 import struct
 

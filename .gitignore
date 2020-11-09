@@ -1,3 +1,8 @@
+# project specific
+data/
+fairseq_cli/checkpoint/
+fairseq_cli/data-bin/
+
 # JetBrains PyCharm IDE
 .idea/
 

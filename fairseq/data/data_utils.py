@@ -58,7 +58,8 @@ def collate_tokens(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_be
     return res
 
 
-def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False, default='cached'):
+def load_indexed_dataset(path, dictionary=None, dataset_impl=None,
+                         combine=False, default='cached'):
     """A helper function for loading indexed datasets.
 
     Args:
@@ -86,7 +87,7 @@ def load_indexed_dataset(path, dictionary=None, dataset_impl=None, combine=False
             path_k,
             impl=dataset_impl_k or default,
             fix_lua_indexing=True,
-            dictionary=dictionary,
+            dictionary=dictionary
         )
         if dataset is None:
             break
