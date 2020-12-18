@@ -258,8 +258,9 @@ def validate_and_save(
     num_updates = trainer.get_num_updates()
     max_update = cfg.optimization.max_update or math.inf
     do_save = (
-        (end_of_epoch and epoch_itr.epoch % cfg.checkpoint.save_interval == 0)
-        or num_updates >= max_update
+        # @memray disable end of epoch saving
+        # (end_of_epoch and epoch_itr.epoch % cfg.checkpoint.save_interval == 0)
+        num_updates >= max_update
         or (
             cfg.checkpoint.save_interval_updates > 0
             and num_updates > 0

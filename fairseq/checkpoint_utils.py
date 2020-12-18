@@ -63,11 +63,17 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
     checkpoint_conds["checkpoint{}{}.pt".format(epoch, suffix)] = (
         end_of_epoch and not cfg.no_epoch_checkpoints and epoch % cfg.save_interval == 0
     )
-    checkpoint_conds["checkpoint_{}_{}{}.pt".format(epoch, updates, suffix)] = (
+    # @memray, use steps in name only
+    checkpoint_conds["checkpoint_step_{}.pt".format(updates)] = (
         not end_of_epoch
         and cfg.save_interval_updates > 0
         and updates % cfg.save_interval_updates == 0
     )
+    # checkpoint_conds["checkpoint_{}_{}{}.pt".format(epoch, updates, suffix)] = (
+    #     not end_of_epoch
+    #     and cfg.save_interval_updates > 0
+    #     and updates % cfg.save_interval_updates == 0
+    # )
     checkpoint_conds["checkpoint_best{}.pt".format(suffix)] = val_loss is not None and (
         not hasattr(save_checkpoint, "best")
         or is_better(val_loss, save_checkpoint.best)

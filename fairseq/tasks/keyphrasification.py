@@ -32,31 +32,43 @@ KP_CONCAT_TYPES = ['one2one', 'random',
                    'alphab', 'alphab_reverse',
                    'length', 'length_reverse']
 
+KP_DATASET_FIELDS = {'scipaper': ('title', 'abstract', 'keywords', None),
+                     'qa': ('title', 'question', 'tags', 'categories'),
+                     'webpage': ('url', 'text', 'KeyPhrases', None),
+                     'news': ('title', 'abstract', 'keyword', 'categories')}
+
 logger = logging.getLogger(__name__)
 
 
-def parse_src_fn(ex_dict):
-    concat_str = ex_dict['title'] + ' . ' + ex_dict['abstract']
+def parse_src_fn(ex_dict, title_field, text_field):
+    concat_str = ex_dict[title_field] + ' . ' + ex_dict[text_field]
     return concat_str
 
 
-def kpdict_parse_fn(ex_dict, tgt_concat_type, tokenizer, lowercase=False):
-    src_str = parse_src_fn(ex_dict)
-    if isinstance(ex_dict['keywords'], str):
-        tgt_kps = ex_dict['keywords'].split(';')
+def kpdict_parse_fn(ex_dict, tokenizer, kp_concat_type, dataset_type='scipaper', max_target_phrases=-1, lowercase=False):
+    assert dataset_type in KP_DATASET_FIELDS
+    title_field, text_field, keyword_field, category_field = KP_DATASET_FIELDS[dataset_type]
+
+    src_str = parse_src_fn(ex_dict, title_field, text_field)
+    if isinstance(ex_dict[keyword_field], str):
+        tgt_kps = ex_dict[keyword_field].split(';')
     else:
-        tgt_kps = ex_dict['keywords']
-    if tgt_concat_type == 'one2one':
+        tgt_kps = ex_dict[keyword_field]
+    if kp_concat_type == 'one2one':
         # sample one tgt from multiple tgts and use it as the only tgt
         rand_idx = np.random.randint(len(tgt_kps))
         tgt_str = tgt_kps[rand_idx]
-    elif tgt_concat_type in KP_CONCAT_TYPES:
+    elif kp_concat_type in KP_CONCAT_TYPES:
         # generate one2seq training data points
-        order = obtain_sorted_indices(src_str.lower().split(), [kp.lower().split() for kp in tgt_kps], sort_by=tgt_concat_type)
+        order = obtain_sorted_indices(src_str.lower().split(),
+                                      [kp.lower().split() for kp in tgt_kps],
+                                      sort_by=kp_concat_type)
+        if max_target_phrases > 0 and len(order) > max_target_phrases:
+            order = order[: max_target_phrases]
         tgt = [tgt_kps[idx] for idx in order]
         tgt_str = tokenizer.sep_token.join(tgt)
     else:
-        raise NotImplementedError('Unsupported target concatenation type ' + tgt_concat_type)
+        raise NotImplementedError('Unsupported target concatenation type ' + kp_concat_type)
 
     if lowercase:
         return src_str.lower(), tgt_str.lower()
@@ -175,14 +187,16 @@ def if_present_phrase(src_str_tokens, phrase_str_tokens):
 def load_kppair_dataset(
     data_path, split,
     text_tokenizer, dictionary,
-    tgt_concat_type,
+    kp_concat_type,
     combine, upsample_primary,
     left_pad_source, left_pad_target,
     max_source_length, max_target_length,
+    max_target_phrases,
     num_buckets=0,
     shuffle=True,
     pad_to_multiple=1,
     lowercase=False,
+    dataset_type=None
 ):
     src_datasets = []
     tgt_datasets = []
@@ -191,27 +205,28 @@ def load_kppair_dataset(
         split_k = split + ('-'+str(k) if split == 'train' else '')
         filepath = os.path.join(os.path.realpath(data_path), '{}.json'.format(split_k))
 
+        # for cases that train set is not split into pieces
+        if not os.path.exists(filepath):
+            filepath = os.path.join(os.path.realpath(data_path), '{}.json'.format(split))
+            combine = False
+
         if not os.path.exists(filepath):
             if k > 0:
                 break
             else:
                 raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
 
-        ex_dicts = []
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f: ex_dicts.append(json.loads(line))
-
-        src_dataset = KeyphraseRawDataset(ex_dicts)
+        src_dataset = KeyphraseRawDataset(filepath, dataset_type)
         src_datasets.append(src_dataset)
 
         # tgt_dataset = KeyphraseRawDataset(ex_dicts)
-                                    # parse_fn=partial(parse_tgt_fn, tgt_concat_type=tgt_type, tokenizer=text_tokenizer.tokenizer),
+                                    # parse_fn=partial(parse_tgt_fn, kp_concat_type=tgt_type, tokenizer=text_tokenizer.tokenizer),
                                     # text_tokenizer=text_tokenizer)
         # if tgt_dataset is not None:
         #     tgt_datasets.append(tgt_dataset)
 
         logger.info('{} {} {} examples'.format(
-            data_path, split_k, len(src_datasets[-1])
+            data_path, split_k, len(src_dataset)
         ))
 
         if not combine:
@@ -237,13 +252,16 @@ def load_kppair_dataset(
     #     if tgt_dataset is not None:
     #         tgt_dataset = PrependTokenDataset(tgt_dataset, dictionary.bos())
 
-    eos = None
-    parse_fn = partial(kpdict_parse_fn, tgt_concat_type=tgt_concat_type, tokenizer=text_tokenizer, lowercase=lowercase)
+    if not dataset_type:
+        dataset_type = src_dataset.dataset_type
+    parse_fn = partial(kpdict_parse_fn, tokenizer=text_tokenizer,
+                       kp_concat_type=kp_concat_type, dataset_type=dataset_type,
+                       max_target_phrases=max_target_phrases, lowercase=lowercase)
     return KeyphrasePairDataset(
         src_dataset, src_dict=dictionary, src_sizes=src_dataset.sizes,
         text_tokenizer=text_tokenizer, parse_fn=parse_fn,
         # tgt=tgt_dataset, tgt_sizes=tgt_dataset.sizes, tgt_dict=dictionary,
-        tgt_concat_type=tgt_concat_type,
+        kp_concat_type=kp_concat_type,
         shuffle=shuffle,
         left_pad_source=left_pad_source,
         left_pad_target=left_pad_target,
@@ -286,7 +304,7 @@ class KeyphrasificationTask(LegacyFairseqTask):
                             avoid the need for repeating them in all directories')
         parser.add_argument("--dict-path", type=str,
                             help='path to vocab.bpe.')
-        parser.add_argument("--tgt-concat-type", default='nosort',
+        parser.add_argument("--kp-concat-type", default='nosort',
                             choices=KP_CONCAT_TYPES,
                             help='how to present target sequence')
         parser.add_argument("--num-encoder-workers", type=int, default=20)
@@ -298,6 +316,9 @@ class KeyphrasificationTask(LegacyFairseqTask):
                             help='(for processing data) max number of tokens in source')
         parser.add_argument('--max-target-length', default=128, type=int, metavar='N',
                             help='(for processing data) max number of tokens in target')
+        parser.add_argument('--max-target-phrases', default=-1, type=int, metavar='N',
+                            help='max number of phrases in target. If exceeds, random max_num phrases will be used.'
+                                 'If -1, all phrases will be retained.')
         parser.add_argument('--max-source-positions', default=1024, type=int, metavar='N',
                             help='(for initializing model embeddings) max number of tokens in the source sequence')
         parser.add_argument('--max-target-positions', default=1024, type=int, metavar='N',
@@ -316,31 +337,37 @@ class KeyphrasificationTask(LegacyFairseqTask):
         super().__init__(args)
         self.tokenizer = args.tokenizer
 
+        assert os.path.exists(args.bpe_vocab) and os.path.exists(args.bpe_merges),\
+            "Both vocab and merges are needed to load Huggingface tokenizer"
+        assert os.path.exists(args.dict_path),\
+            "Fairseq dict file is needed."
         if args.bpe == 'hf_pretrained_bpe':
             text_tokenizer = HuggingFacePretrainedBPE.load(args)
-            logger.info('Loaded dictionary from Huggingface {}'.format(args.pretrained_vocab))
-        elif args.bpe == 'gpt2':
-            text_tokenizer = get_encoder(args.encoder_json, args.vocab_bpe)
-            logger.info('Loaded dictionary from fairseq GPT2')
+            logger.info('Loaded dictionary from Huggingface {}'.format(args.bpe_vocab))
+        # elif args.bpe == 'gpt2':
+        #     text_tokenizer = get_encoder(args.encoder_json, args.vocab_bpe)
+        #     logger.info('Loaded dictionary from fairseq GPT2')
         else:
             raise NotImplementedError('Unsupported tokenizer %s' % args.tokenizer)
 
-        # load dictionaries, see https://github.com/pytorch/fairseq/issues/1432
+        # Lsoad dictionaries, see https://github.com/pytorch/fairseq/issues/1432
         dictionary = self.load_dictionary(args.dict_path)
-        dictionary.indices[text_tokenizer.mask_token] = text_tokenizer.mask_token_id
-        setattr(dictionary, 'mask_word', text_tokenizer.mask_token)
-        setattr(dictionary, 'mask_index', text_tokenizer.mask_token_id)
-        dictionary.indices[text_tokenizer.sep_token] = text_tokenizer.sep_token_id
-        setattr(dictionary, 'sep_word', text_tokenizer.sep_token)
-        setattr(dictionary, 'sep_index', text_tokenizer.sep_token_id)
-        dictionary.nspecial = 6
+        # Note that in vocab.txt, madeupword0001 is replaced with <sep>.
+        #   It seems other special tokens like <present> don't need explicit setting.
+        # dictionary.indices[text_tokenizer.mask_token] = text_tokenizer.mask_token_id
+        # setattr(dictionary, 'mask_word', text_tokenizer.mask_token)
+        # setattr(dictionary, 'mask_index', text_tokenizer.mask_token_id)
+        # dictionary.indices[text_tokenizer.sep_token] = text_tokenizer.sep_token_id
+        # setattr(dictionary, 'sep_word', text_tokenizer.sep_token)
+        # setattr(dictionary, 'sep_index', text_tokenizer.sep_token_id)
+        # dictionary.nspecial = len(text_tokenizer.all_special_tokens)
         # embedding initilization replies on symbols (or manually edit the dict file to add SEP and MASK)
         # dictionary.symbols.extend([text_tokenizer.mask_token, text_tokenizer.sep_token])
 
         self.dictionary = dictionary
         self.text_tokenizer = text_tokenizer
         assert len(dictionary.indices) == text_tokenizer.vocab_size
-        self.tgt_concat_type = args.tgt_concat_type
+        self.kp_concat_type = args.kp_concat_type
 
     @classmethod
     def setup_task(cls, args, **kwargs):
@@ -373,13 +400,14 @@ class KeyphrasificationTask(LegacyFairseqTask):
         self.datasets[split] = load_kppair_dataset(
             data_path, split,
             self.text_tokenizer, self.dictionary,
-            self.tgt_concat_type,
+            self.kp_concat_type,
             combine=combine,
             upsample_primary=self.args.upsample_primary,
             left_pad_source=self.args.left_pad_source,
             left_pad_target=self.args.left_pad_target,
             max_source_length=self.args.max_source_length,
             max_target_length=self.args.max_target_length,
+            max_target_phrases=self.args.max_target_phrases,
             num_buckets=self.args.num_batch_buckets,
             shuffle=(split != 'test'),
             pad_to_multiple=self.args.required_seq_len_multiple,
