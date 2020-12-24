@@ -11,7 +11,6 @@ import torch.nn as nn
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
-from fairseq.models.fairseq_encoder import EncoderOut
 from torch import Tensor
 
 
@@ -279,8 +278,8 @@ class SequenceGenerator(nn.Module):
         cand_size = 2 * beam_size  # 2 x beam size in case half are EOS
 
         # offset arrays for converting between different indexing schemes
-        bbsz_offsets = (torch.arange(0, bsz) * beam_size).unsqueeze(1).type_as(tokens)
-        cand_offsets = torch.arange(0, cand_size).type_as(tokens)
+        bbsz_offsets = (torch.arange(0, bsz) * beam_size).unsqueeze(1).type_as(tokens).to(src_tokens.device)
+        cand_offsets = torch.arange(0, cand_size).type_as(tokens).to(src_tokens.device)
 
         reorder_state: Optional[Tensor] = None
         batch_idxs: Optional[Tensor] = None
@@ -420,7 +419,7 @@ class SequenceGenerator(nn.Module):
                 break
             if self.search.stop_on_max_len and step >= max_len:
                 break
-            assert step < max_len
+            assert step < max_len, f"{step} < {max_len}"
 
             # Remove finalized sentences (ones for which {beam_size}
             # finished hypotheses have been generated) from the batch.
@@ -806,13 +805,13 @@ class EnsembleModel(nn.Module):
     def forward_decoder(
         self,
         tokens,
-        encoder_outs: List[EncoderOut],
+        encoder_outs: List[Dict[str, List[Tensor]]],
         incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
         temperature: float = 1.0,
     ):
         log_probs = []
         avg_attn: Optional[Tensor] = None
-        encoder_out: Optional[EncoderOut] = None
+        encoder_out: Optional[Dict[str, List[Tensor]]] = None
         for i, model in enumerate(self.models):
             if self.has_encoder():
                 encoder_out = encoder_outs[i]
@@ -868,7 +867,7 @@ class EnsembleModel(nn.Module):
         return avg_probs, avg_attn
 
     @torch.jit.export
-    def reorder_encoder_out(self, encoder_outs: Optional[List[EncoderOut]], new_order):
+    def reorder_encoder_out(self, encoder_outs: Optional[List[Dict[str, List[Tensor]]]], new_order):
         """
         Reorder encoder output according to *new_order*.
 
@@ -879,7 +878,7 @@ class EnsembleModel(nn.Module):
         Returns:
             *encoder_out* rearranged according to *new_order*
         """
-        new_outs: List[EncoderOut] = []
+        new_outs: List[Dict[str, List[Tensor]]] = []
         if not self.has_encoder():
             return new_outs
         for i, model in enumerate(self.models):
@@ -904,7 +903,7 @@ class EnsembleModel(nn.Module):
 
 
 class SequenceGeneratorWithAlignment(SequenceGenerator):
-    def __init__(self, models, tgt_dict, left_pad_target=False, **kwargs):
+    def __init__(self, models, tgt_dict, left_pad_target=False, print_alignment="hard", **kwargs):
         """Generates translations of a given source sentence.
 
         Produces alignments following "Jointly Learning to Align and
@@ -917,6 +916,11 @@ class SequenceGeneratorWithAlignment(SequenceGenerator):
         """
         super().__init__(EnsembleModelWithAlignment(models), tgt_dict, **kwargs)
         self.left_pad_target = left_pad_target
+
+        if print_alignment == "hard":
+            self.extract_alignment = utils.extract_hard_alignment
+        elif print_alignment == "soft":
+            self.extract_alignment = utils.extract_soft_alignment
 
     @torch.no_grad()
     def generate(self, models, sample, **kwargs):
@@ -946,7 +950,7 @@ class SequenceGeneratorWithAlignment(SequenceGenerator):
 
         # Process the attn matrix to extract hard alignments.
         for i in range(bsz * beam_size):
-            alignment = utils.extract_hard_alignment(
+            alignment = self.extract_alignment(
                 attn[i], src_tokens[i], tgt_tokens[i], self.pad, self.eos
             )
             finalized[i // beam_size][i % beam_size]["alignment"] = alignment

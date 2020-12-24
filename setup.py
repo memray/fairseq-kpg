@@ -22,14 +22,18 @@ def write_version_py():
 
     # append latest commit hash to version string
     try:
-        sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+        sha = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"])
+            .decode("ascii")
+            .strip()
+        )
         version += "+" + sha[:7]
     except Exception:
         pass
 
     # write version info to fairseq/version.py
     with open(os.path.join("fairseq", "version.py"), "w") as f:
-        f.write("__version__ = \"{}\"\n".format(version))
+        f.write('__version__ = "{}"\n'.format(version))
     return version
 
 
@@ -132,7 +136,7 @@ if "READTHEDOCS" in os.environ:
 
     # use CPU build of PyTorch
     dependency_links = [
-        "https://download.pytorch.org/whl/cpu/torch-1.3.0%2Bcpu-cp36-cp36m-linux_x86_64.whl"
+        "https://download.pytorch.org/whl/cpu/torch-1.7.0%2Bcpu-cp36-cp36m-linux_x86_64.whl"
     ]
 else:
     dependency_links = []
@@ -149,6 +153,11 @@ if "clean" in sys.argv[1:]:
     )
 
 
+extra_packages = []
+if os.path.exists(os.path.join("fairseq", "model_parallel", "megatron", "mpu")):
+    extra_packages.append("fairseq.model_parallel.megatron.mpu")
+
+
 def do_setup(package_data):
     setup(
         name="fairseq",
@@ -159,22 +168,26 @@ def do_setup(package_data):
             "Intended Audience :: Science/Research",
             "License :: OSI Approved :: MIT License",
             "Programming Language :: Python :: 3.6",
+            "Programming Language :: Python :: 3.7",
+            "Programming Language :: Python :: 3.8",
             "Topic :: Scientific/Engineering :: Artificial Intelligence",
         ],
         long_description=readme,
         long_description_content_type="text/markdown",
         setup_requires=[
             "cython",
-            "numpy",
+            'numpy<1.20.0; python_version<"3.7"',
+            'numpy; python_version>="3.7"',
             "setuptools>=18.0",
         ],
         install_requires=[
             "cffi",
             "cython",
-            "dataclasses",
-            "editdistance",
-            "hydra-core",
-            "numpy",
+            'dataclasses; python_version<"3.7"',
+            "hydra-core<1.1",
+            "omegaconf<2.1",
+            'numpy<1.20.0; python_version<"3.7"',
+            'numpy; python_version>="3.7"',
             "regex",
             "sacrebleu>=1.4.12",
             "torch",
@@ -190,7 +203,8 @@ def do_setup(package_data):
                 "tests",
                 "tests.*",
             ]
-        ),
+        )
+        + extra_packages,
         package_data=package_data,
         ext_modules=extensions,
         test_suite="tests",
@@ -198,6 +212,7 @@ def do_setup(package_data):
             "console_scripts": [
                 "fairseq-eval-lm = fairseq_cli.eval_lm:cli_main",
                 "fairseq-generate = fairseq_cli.generate:cli_main",
+                "fairseq-hydra-train = fairseq_cli.hydra_train:cli_main",
                 "fairseq-interactive = fairseq_cli.interactive:cli_main",
                 "fairseq-preprocess = fairseq_cli.preprocess:cli_main",
                 "fairseq-score = fairseq_cli.score:cli_main",
@@ -223,12 +238,16 @@ def get_files(path, relative_to="fairseq"):
 
 try:
     # symlink examples into fairseq package so package_data accepts them
-    if "build_ext" not in sys.argv[1:]:
-        os.symlink(os.path.join("..", "examples"), "fairseq/examples")
+    fairseq_examples = os.path.join("fairseq", "examples")
+    if "build_ext" not in sys.argv[1:] and not os.path.exists(fairseq_examples):
+        os.symlink(os.path.join("..", "examples"), fairseq_examples)
+
     package_data = {
-        "fairseq": get_files("fairseq/examples"),
+        "fairseq": (
+            get_files(fairseq_examples) + get_files(os.path.join("fairseq", "config"))
+        )
     }
     do_setup(package_data)
 finally:
-    if "build_ext" not in sys.argv[1:]:
-        os.unlink("fairseq/examples")
+    if "build_ext" not in sys.argv[1:] and os.path.exists(fairseq_examples):
+        os.unlink(fairseq_examples)

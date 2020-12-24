@@ -7,10 +7,12 @@ import logging
 import os
 import warnings
 from argparse import Namespace
+from typing import List
 
 import torch
 from fairseq import metrics, search, tokenizer, utils
 from fairseq.data import Dictionary, FairseqDataset, data_utils, encoders, iterators
+from fairseq.dataclass import FairseqDataclass
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from omegaconf import DictConfig
 
@@ -40,7 +42,7 @@ class FairseqTask(object):
         """
         return criterion.logging_outputs_can_be_summed()
 
-    def __init__(self, cfg: DictConfig, **kwargs):
+    def __init__(self, cfg: FairseqDataclass, **kwargs):
         self.cfg = cfg
         self.datasets = {}
         self.dataset_to_epoch_iter = {}
@@ -90,11 +92,20 @@ class FairseqTask(object):
     def has_sharded_data(self, split):
         return os.pathsep in getattr(self.cfg, "data", "")
 
-    def load_dataset(self, split, combine=False, **kwargs):
+    def load_dataset(
+        self,
+        split: str,
+        combine: bool = False,
+        task_cfg: FairseqDataclass = None,
+        **kwargs
+    ):
         """Load a given dataset split.
 
         Args:
             split (str): name of the split (e.g., train, valid, test)
+            combine (bool): combines a split segmented into pieces into one dataset
+            task_cfg (FairseqDataclass): optional task configuration stored in the checkpoint that can be used
+                                         to load datasets
         """
         raise NotImplementedError
 
@@ -255,13 +266,13 @@ class FairseqTask(object):
 
         return epoch_iter
 
-    def build_model(self, cfg: DictConfig):
+    def build_model(self, cfg: FairseqDataclass):
         """
         Build the :class:`~fairseq.models.BaseFairseqModel` instance for this
         task.
 
         Args:
-            cfg (omegaconf.DictConfig): configuration object
+            cfg (FairseqDataclass): configuration object
 
         Returns:
             a :class:`~fairseq.models.BaseFairseqModel` instance
@@ -269,8 +280,6 @@ class FairseqTask(object):
         from fairseq import models, quantization_utils
 
         model = models.build_model(cfg, self)
-        if getattr(cfg, "tpu", False):
-            model.prepare_for_tpu_()
         model = quantization_utils.quantize_model_scalar(model, cfg)
         return model
 
@@ -365,12 +374,14 @@ class FairseqTask(object):
         else:
             search_strategy = search.BeamSearch(self.target_dictionary)
 
+        extra_gen_cls_kwargs = extra_gen_cls_kwargs or {}
         if seq_gen_cls is None:
             if getattr(args, "print_alignment", False):
                 seq_gen_cls = SequenceGeneratorWithAlignment
+                extra_gen_cls_kwargs['print_alignment'] = args.print_alignment
             else:
                 seq_gen_cls = SequenceGenerator
-        extra_gen_cls_kwargs = extra_gen_cls_kwargs or {}
+
         return seq_gen_cls(
             models,
             self.target_dictionary,
@@ -426,6 +437,14 @@ class FairseqTask(object):
         with torch.no_grad():
             loss, sample_size, logging_output = criterion(model, sample)
         return loss, sample_size, logging_output
+
+    def optimizer_step(self, optimizer, model, update_num):
+        optimizer.step()
+
+    def build_dataset_for_inference(
+        self, src_tokens: List[torch.Tensor], src_lengths: List[int], **kwargs
+    ) -> torch.utils.data.Dataset:
+        raise NotImplementedError
 
     def inference_step(
         self, generator, models, sample, prefix_tokens=None, constraints=None
@@ -546,8 +565,6 @@ class LegacyFairseqTask(FairseqTask):
         from fairseq import models, quantization_utils
 
         model = models.build_model(args, self)
-        if getattr(args, "tpu", False):
-            model.prepare_for_tpu_()
         model = quantization_utils.quantize_model_scalar(model, args)
         return model
 

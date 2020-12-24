@@ -178,10 +178,7 @@ class Trainer(object):
     @property
     def model(self):
         if self._wrapped_model is None:
-            if (
-                self.data_parallel_world_size > 1
-                and not self.cfg.optimization.use_bmuf
-            ):
+            if self.data_parallel_world_size > 1 and not self.cfg.optimization.use_bmuf:
                 self._wrapped_model = models.DistributedFairseqModel(
                     self.cfg.distributed_training,
                     self._model,
@@ -279,6 +276,7 @@ class Trainer(object):
                 self._optim_history,
                 extra_state,
             )
+            logger.info(f"Finished saving checkpoint to {filename}")
 
     def load_checkpoint(
         self,
@@ -295,14 +293,17 @@ class Trainer(object):
         """
         extra_state, self._optim_history, last_optim_state = None, [], None
 
+        logger.info(f"Preparing to load checkpoint {filename}")
         bexists = PathManager.isfile(filename)
         if bexists:
-            if (
-                self.data_parallel_rank == 0
+            load_on_all_ranks = (
+                self.cfg.checkpoint.load_checkpoint_on_all_dp_ranks
                 # TPUs don't support broadcast yet, so load checkpoints
                 # on every worker for now
                 or self.tpu
-            ):
+            )
+
+            if load_on_all_ranks or self.data_parallel_rank == 0:
                 state = checkpoint_utils.load_checkpoint_to_cpu(filename)
                 last_optim_state = state.get("last_optimizer_state", None)
 
@@ -310,7 +311,8 @@ class Trainer(object):
                 # state. Later we will broadcast sharded states to each rank
                 # to avoid memory from exploding.
                 if (
-                    self.cfg.distributed_training.zero_sharding == "os"
+                    not load_on_all_ranks
+                    and self.cfg.distributed_training.zero_sharding == "os"
                     and "last_optimizer_state" in state
                     and self.data_parallel_world_size > 1
                 ):
@@ -319,11 +321,7 @@ class Trainer(object):
                 last_optim_state = None
                 state = None
 
-            if (
-                self.data_parallel_world_size > 1
-                # disable on TPUs until they support broadcast
-                and not self.tpu
-            ):
+            if self.data_parallel_world_size > 1 and not load_on_all_ranks:
                 state = distributed_utils.broadcast_object(
                     state,
                     src_rank=0,
@@ -366,7 +364,7 @@ class Trainer(object):
             if not reset_lr_scheduler:
                 self.lr_scheduler.load_state_dict(last_optim["lr_scheduler_state"])
 
-            if self.data_parallel_world_size > 1:
+            if not load_on_all_ranks and self.data_parallel_world_size > 1:
                 last_optim_state = self.optimizer.broadcast_global_state_dict(
                     last_optim_state
                 )
@@ -376,11 +374,6 @@ class Trainer(object):
 
         if extra_state is not None:
             epoch = extra_state["train_iterator"]["epoch"]
-            logger.info(
-                "loaded checkpoint {} (epoch {} @ {} updates)".format(
-                    filename, epoch, self.get_num_updates()
-                )
-            )
 
             if "previous_training_time" in extra_state:
                 self._previous_training_time = extra_state["previous_training_time"]
@@ -395,8 +388,15 @@ class Trainer(object):
                 for meter in metrics.get_meters("default"):
                     if isinstance(meter, meters.TimeMeter):
                         meter.reset()
+
+            logger.info(
+                "Loaded checkpoint {} (epoch {} @ {} updates)".format(
+                    filename, epoch, self.get_num_updates()
+                )
+            )
+
         else:
-            logger.info("no existing checkpoint found {}".format(filename))
+            logger.info("No existing checkpoint found {}".format(filename))
 
         return extra_state
 
@@ -506,16 +506,7 @@ class Trainer(object):
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
         for i, sample in enumerate(samples):
-            sample = self._prepare_sample(sample)
-            if sample is None:
-                # when sample is None, run forward/backward on a dummy batch
-                # and ignore the resulting gradients
-                sample = self._prepare_sample(self._dummy_batch)
-                is_dummy_batch = True
-            else:
-                if self._dummy_batch == "DUMMY":
-                    self._dummy_batch = sample
-                is_dummy_batch = False
+            sample, is_dummy_batch = self._prepare_sample(sample)
 
             def maybe_no_sync():
                 """
@@ -632,29 +623,38 @@ class Trainer(object):
                 grad_norm = self.clip_grad_norm(self.cfg.optimization.clip_norm)
 
             # check that grad norms are consistent across workers
-            if (
-                not self.cfg.optimization.use_bmuf
-                and self.cfg.distributed_training.distributed_wrapper != "SlowMo"
-                and not self.tpu
-            ):
-                self._check_grad_norms(grad_norm)
+            # on tpu check tensor is slow
+            if not self.tpu:
+                if (
+                    not self.cfg.optimization.use_bmuf
+                    and self.cfg.distributed_training.distributed_wrapper != "SlowMo"
+                ):
+                    self._check_grad_norms(grad_norm)
+                if not torch.isfinite(grad_norm).all():
+                    # check local gradnorm single GPU case, trigger NanDetector
+                    raise FloatingPointError("gradients are Nan/Inf")
 
             with torch.autograd.profiler.record_function("optimizer"):
                 # take an optimization step
-                self.optimizer.step()
+                self.task.optimizer_step(
+                    self.optimizer, model=self.model, update_num=self.get_num_updates()
+                )
 
         except FloatingPointError:
             # re-run the forward and backward pass with hooks attached to print
             # out where it fails
+            self.zero_grad()
             with NanDetector(self.get_model()):
-                self.task.train_step(
-                    sample,
-                    self.model,
-                    self.criterion,
-                    self.optimizer,
-                    self.get_num_updates(),
-                    ignore_grad=False,
-                )
+                for _, sample in enumerate(samples):
+                    sample, _ = self._prepare_sample(sample)
+                    self.task.train_step(
+                        sample,
+                        self.model,
+                        self.criterion,
+                        self.optimizer,
+                        self.get_num_updates(),
+                        ignore_grad=False,
+                    )
             raise
         except OverflowError as e:
             overflow = True
@@ -769,14 +769,7 @@ class Trainer(object):
             self.model.eval()
             self.criterion.eval()
 
-            sample = self._prepare_sample(sample)
-            if sample is None:
-                sample = self._prepare_sample(self._dummy_batch)
-                is_dummy_batch = True
-            else:
-                if self._dummy_batch == "DUMMY":
-                    self._dummy_batch = sample
-                is_dummy_batch = False
+            sample, is_dummy_batch = self._prepare_sample(sample)
 
             try:
                 _loss, sample_size, logging_output = self.task.valid_step(
@@ -835,7 +828,12 @@ class Trainer(object):
     def lr_step_update(self):
         """Update the learning rate after each update."""
         new_lr = self.lr_scheduler.step_update(self.get_num_updates())
-        metrics.log_scalar("lr", new_lr, weight=0, priority=300)
+        if isinstance(new_lr, dict):
+            for k, v in new_lr.items():
+                metrics.log_scalar(f"lr_{k}", v, weight=0, priority=300)
+            new_lr = new_lr.get("default", next(iter(new_lr.values())))
+        else:
+            metrics.log_scalar("lr", new_lr, weight=0, priority=300)
         return new_lr
 
     def get_lr(self):
@@ -917,7 +915,7 @@ class Trainer(object):
         """Aggregate training time in seconds."""
         return time.time() - self._start_time + self._previous_training_time
 
-    def _prepare_sample(self, sample):
+    def _prepare_sample(self, sample, is_dummy=False):
         if sample == "DUMMY":
             raise Exception(
                 "Trying to use an uninitialized 'dummy' batch. This usually indicates "
@@ -926,7 +924,11 @@ class Trainer(object):
             )
 
         if sample is None or len(sample) == 0:
-            return None
+            assert (
+                self._dummy_batch is not None and len(self._dummy_batch) > 0
+            ), "Invalid dummy batch: {}".format(self._dummy_batch)
+            sample, _ = self._prepare_sample(self._dummy_batch, is_dummy=True)
+            return sample, True
 
         if self.cuda:
             if self.pipeline_model_parallel:
@@ -936,6 +938,9 @@ class Trainer(object):
                     )
             else:
                 sample = utils.move_to_cuda(sample)
+        elif self.tpu and is_dummy:
+            # the dummy batch may not be on the appropriate device
+            sample = utils.move_to_cuda(sample, device=self.device)
 
         def apply_half(t):
             if t.dtype is torch.float32:
@@ -953,7 +958,10 @@ class Trainer(object):
         if self.cfg.common.bf16:
             sample = utils.apply_to_sample(apply_bfloat16, sample)
 
-        return sample
+        if self._dummy_batch == "DUMMY":
+            self._dummy_batch = sample
+
+        return sample, False
 
     def _set_seed(self):
         # Set seed based on args.seed and the update number so that we get
@@ -1078,7 +1086,7 @@ class Trainer(object):
             def is_consistent(tensor):
                 max_abs_diff = torch.max(torch.abs(tensor - tensor[0]))
                 return (
-                    not torch.isfinite(tensor).any()
+                    torch.isfinite(tensor).all()
                     or (max_abs_diff / (tensor[0] + 1e-6) < 1e-6).all()
                 )
 
@@ -1090,7 +1098,8 @@ class Trainer(object):
                 error_detail = "grad_norm across the workers:\n{}\n".format(
                     pretty_detail
                 )
-                raise RuntimeError(
+                # use FloatingPointError to trigger NanDetector
+                raise FloatingPointError(
                     "Fatal error: gradients are inconsistent between workers. "
                     "Try --ddp-backend=no_c10d. "
                     "Or are you mixing up different generation of GPUs in training?"

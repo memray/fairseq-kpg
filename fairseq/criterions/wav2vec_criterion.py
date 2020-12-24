@@ -4,35 +4,44 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
+from fairseq.dataclass import FairseqDataclass
 from fairseq.logging.meters import safe_round
 
 
-@register_criterion("wav2vec")
+@dataclass
+class Wav2VecCriterionConfig(FairseqDataclass):
+    infonce: bool = field(
+        default=False,
+        metadata={
+            "help": "if set, uses cross entropy instead of binary cross entropy (i.e. InfoNCE loss)"
+        },
+    )
+    loss_weights: Optional[List[float]] = field(
+        default=None,
+        metadata={"help": "weights for additional loss terms (not first one)"},
+    )
+    log_keys: List[str] = field(
+        default_factory=lambda: [],
+        metadata={"help": "output keys to log"},
+    )
+
+
+@register_criterion("wav2vec", dataclass=Wav2VecCriterionConfig)
 class Wav2vecCriterion(FairseqCriterion):
     def __init__(self, task, infonce=False, loss_weights=None, log_keys=None):
         super().__init__(task)
         self.infonce = infonce
-        self.loss_weights = None if loss_weights is None else eval(loss_weights)
-        self.log_keys = [] if log_keys is None else eval(log_keys)
+        self.loss_weights = loss_weights
+        self.log_keys = [] if log_keys is None else log_keys
 
-    @staticmethod
-    def add_args(parser):
-        """Add criterion-specific arguments to the parser."""
-        # fmt: off
-        parser.add_argument('--infonce', action='store_true',
-                            help='if set, uses cross entropy instead of binary cross entropy (i.e. InfoNCE loss)')
-        parser.add_argument('--loss-weights', type=str, default=None,
-                            help='weights for additional loss terms (not first one)')
-        parser.add_argument('--log-keys', type=str, default=None,
-                            help='output keys to log')
-        # fmt: on
-
-    def forward(self, model, sample, reduce=True, log_pred=False):
+    def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:
@@ -116,9 +125,6 @@ class Wav2vecCriterion(FairseqCriterion):
                 logging_output["correct"] = corr
                 logging_output["count"] = count
 
-        if log_pred:
-            logging_output["logits"] = logits.cpu().numpy()
-            logging_output["target"] = target.cpu().numpy()
         return loss, sample_size, logging_output
 
     @staticmethod
@@ -166,13 +172,13 @@ class Wav2vecCriterion(FairseqCriterion):
 
         for k in logging_outputs[0]:
             if k not in builtin_keys:
-                val = sum(log.get(k, 0) for log in logging_outputs) / len(
-                    logging_outputs
-                )
+                val = sum(log.get(k, 0) for log in logging_outputs)
                 if k.startswith("loss"):
-                    metrics.log_scalar(k, val / sample_size / math.log(2), sample_size)
+                    metrics.log_scalar(
+                        k, val / sample_size / math.log(2), sample_size, round=3
+                    )
                 else:
-                    metrics.log_scalar(k, val, round=3)
+                    metrics.log_scalar(k, val / len(logging_outputs), round=3)
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:

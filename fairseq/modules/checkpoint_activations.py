@@ -6,6 +6,7 @@
 from typing import Any, Dict, List, Tuple, Union
 
 import torch
+import torch.utils.checkpoint as checkpoint
 
 from fairseq import utils
 
@@ -88,7 +89,6 @@ def split_non_tensors(
     """
     if isinstance(mixed, torch.Tensor):
         return (mixed,), None
-    assert isinstance(mixed, tuple)
     tensors = []
     packed_non_tensors = {"is_tensor": [], "objects": []}
     for o in mixed:
@@ -134,7 +134,7 @@ class CheckpointFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, run_function, parent_ctx_dict, kwarg_keys, *args):
         if torch.is_grad_enabled():  # grad may be disabled, e.g., during validation
-            torch.utils.checkpoint.check_backward_validity(args)
+            checkpoint.check_backward_validity(args)
 
         ctx.run_function = run_function
         ctx.kwarg_keys = kwarg_keys
@@ -151,7 +151,6 @@ class CheckpointFunction(torch.autograd.Function):
         if isinstance(outputs, torch.Tensor):
             return outputs
         else:
-            assert isinstance(outputs, tuple)
             # Autograd Functions don't like non-Tensor outputs. We can split the
             # non-Tensor and Tensor outputs, returning the former by reference
             # through *parent_ctx_dict* and returning the latter directly.
@@ -167,7 +166,7 @@ class CheckpointFunction(torch.autograd.Function):
             )
 
         tensor_inputs = ctx.saved_tensors
-        tensor_inputs = torch.utils.checkpoint.detach_variable(tensor_inputs)
+        tensor_inputs = checkpoint.detach_variable(tensor_inputs)
         inputs = unpack_non_tensors(tensor_inputs, ctx.packed_non_tensor_inputs)
 
         # Store the current states.

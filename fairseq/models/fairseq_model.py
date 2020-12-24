@@ -177,7 +177,7 @@ class BaseFairseqModel(nn.Module):
         def apply_remove_weight_norm(module):
             try:
                 nn.utils.remove_weight_norm(module)
-            except ValueError:  # this module didn't have weight norm
+            except (AttributeError, ValueError):  # this module didn't have weight norm
                 return
 
         self.apply(apply_remove_weight_norm)
@@ -222,21 +222,6 @@ class BaseFairseqModel(nn.Module):
                 module.prepare_for_onnx_export_(**kwargs)
 
         self.apply(apply_prepare_for_onnx_export_)
-
-    def prepare_for_tpu_(self, **kwargs):
-        """Optionally modify model for use on TPUs."""
-        seen = set()
-
-        def apply_prepare_for_tpu_(module):
-            if (
-                module != self
-                and hasattr(module, "prepare_for_tpu_")
-                and module not in seen
-            ):
-                seen.add(module)
-                module.prepare_for_tpu_(**kwargs)
-
-        self.apply(apply_prepare_for_tpu_)
 
     @classmethod
     def from_pretrained(

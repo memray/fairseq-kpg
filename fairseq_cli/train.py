@@ -16,7 +16,6 @@ from typing import Dict, Optional, Any, List, Tuple, Callable
 
 import numpy as np
 import torch
-
 from fairseq import (
     checkpoint_utils,
     distributed_utils,
@@ -29,8 +28,8 @@ from fairseq.data import iterators
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
-from omegaconf import DictConfig
 from fairseq.trainer import Trainer
+from omegaconf import DictConfig
 
 
 logging.basicConfig(
@@ -76,7 +75,7 @@ def main(cfg: DictConfig) -> None:
     logger.info(model)
     logger.info("task: {}".format(task.__class__.__name__))
     logger.info("model: {}".format(model.__class__.__name__))
-    logger.info("criterion: {})".format(criterion.__class__.__name__))
+    logger.info("criterion: {}".format(criterion.__class__.__name__))
     logger.info(
         "num. model params: {} (num. trained: {})".format(
             sum(p.numel() for p in model.parameters()),
@@ -125,7 +124,15 @@ def main(cfg: DictConfig) -> None:
     lr = trainer.get_lr()
     train_meter = meters.StopwatchMeter()
     train_meter.start()
-    while lr > cfg.optimization.min_lr and epoch_itr.next_epoch_idx <= max_epoch:
+    while epoch_itr.next_epoch_idx <= max_epoch:
+        if lr <= cfg.optimization.stop_min_lr:
+            logger.info(
+                f"stopping training because current learning rate ({lr}) is smaller "
+                "than or equal to minimum learning rate "
+                f"(--stop-min-lr={cfg.optimization.stop_min_lr})"
+            )
+            break
+
         # train for one epoch
         valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
         if should_stop:
@@ -189,7 +196,7 @@ def train(
         else cfg.optimization.update_freq[-1]
     )
     itr = iterators.GroupedIterator(itr, update_freq)
-    if getattr(cfg.common, "tpu", False):
+    if cfg.common.tpu:
         itr = utils.tpu_data_loader(itr)
     progress = progress_bar.progress_bar(
         itr,
@@ -203,7 +210,17 @@ def train(
         ),
         default_log_format=("tqdm" if not cfg.common.no_progress_bar else "simple"),
         wandb_project=(
-            cfg.common.wandb_project if distributed_utils.is_master(cfg.distributed_training) else None
+            cfg.common.wandb_project
+            if distributed_utils.is_master(cfg.distributed_training)
+            else None
+        ),
+        wandb_run_name=os.environ.get(
+            "WANDB_NAME", os.path.basename(cfg.checkpoint.save_dir)
+        ),
+        azureml_logging=(
+            cfg.common.azureml_logging
+            if distributed_utils.is_master(cfg.distributed_training)
+            else False
         ),
     )
 
@@ -257,10 +274,33 @@ def validate_and_save(
 ) -> Tuple[List[Optional[float]], bool]:
     num_updates = trainer.get_num_updates()
     max_update = cfg.optimization.max_update or math.inf
+
+    # Stopping conditions (and an additional one based on validation loss later
+    # on)
+    should_stop = False
+    if num_updates >= max_update:
+        should_stop = True
+        logger.info(
+            f"Stopping training due to "
+            f"num_updates: {num_updates} >= max_update: {max_update}"
+        )
+
+    training_time_hours = trainer.cumulative_training_time() / (60 * 60)
+    if (
+        cfg.optimization.stop_time_hours > 0
+        and training_time_hours > cfg.optimization.stop_time_hours
+    ):
+        should_stop = True
+        logger.info(
+            f"Stopping training due to "
+            f"cumulative_training_time: {training_time_hours} > "
+            f"stop_time_hours: {cfg.optimization.stop_time_hours} hour(s)"
+        )
+
     do_save = (
         # @memray disable end of epoch saving
         # (end_of_epoch and epoch_itr.epoch % cfg.checkpoint.save_interval == 0)
-        num_updates >= max_update
+        should_stop
         or (
             cfg.checkpoint.save_interval_updates > 0
             and num_updates > 0
@@ -271,7 +311,7 @@ def validate_and_save(
     do_validate = (
         (not end_of_epoch and do_save)  # validate during mid-epoch saves
         or (end_of_epoch and epoch_itr.epoch % cfg.dataset.validate_interval == 0)
-        or num_updates >= max_update
+        or should_stop
         or (
             cfg.dataset.validate_interval_updates > 0
             and num_updates > 0
@@ -284,20 +324,10 @@ def validate_and_save(
     if do_validate:
         valid_losses = validate(cfg, trainer, task, epoch_itr, valid_subsets)
 
-    # Stopping conditions
-    should_stop = (
-        should_stop_early(cfg, valid_losses[0])
-        or num_updates >= max_update
-        or (
-            cfg.optimization.stop_time_hours > 0
-            and trainer.cumulative_training_time() / (60 * 60)
-            > cfg.optimization.stop_time_hours
-        )
-    )
+    should_stop |= should_stop_early(cfg, valid_losses[0])
 
     # Save checkpoint
     if do_save or should_stop:
-        logger.info("begin save checkpoint")
         checkpoint_utils.save_checkpoint(
             cfg.checkpoint, trainer, epoch_itr, valid_losses[0]
         )
@@ -345,7 +375,12 @@ def validate(
             ),
             default_log_format=("tqdm" if not cfg.common.no_progress_bar else "simple"),
             wandb_project=(
-                cfg.common.wandb_project if distributed_utils.is_master(cfg.distributed_training) else None
+                cfg.common.wandb_project
+                if distributed_utils.is_master(cfg.distributed_training)
+                else None
+            ),
+            wandb_run_name=os.environ.get(
+                "WANDB_NAME", os.path.basename(cfg.checkpoint.save_dir)
             ),
         )
 

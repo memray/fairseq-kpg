@@ -5,13 +5,14 @@
 
 import contextlib
 import logging
+import json
 import os
 import random
 import sys
 import tempfile
 import unittest
 from io import StringIO
-
+from typing import List, Dict
 import torch
 from fairseq import options
 from fairseq_cli import eval_lm, train, validate
@@ -23,6 +24,14 @@ from tests.utils import (
     preprocess_translation_data,
     train_translation_model,
 )
+
+
+try:
+    import transformers  # noqa
+
+    has_hf_transformers = True
+except ImportError:
+    has_hf_transformers = False
 
 
 class TestTranslation(unittest.TestCase):
@@ -295,7 +304,9 @@ class TestTranslation(unittest.TestCase):
                             + dec_ltok_flag,
                         )
 
-    @unittest.skipIf(sys.platform.lower() == "darwin", "skip latent depth test on MacOS")
+    @unittest.skipIf(
+        sys.platform.lower() == "darwin", "skip latent depth test on MacOS"
+    )
     def test_multilingual_translation_latent_depth(self):
         # test with latent depth in encoder, decoder, or both
         encoder_latent_layer = [[], ["--encoder-latent-layer"]]
@@ -425,6 +436,56 @@ class TestTranslation(unittest.TestCase):
                             + dec_ltok_flag,
                         )
 
+    def test_translation_multi_simple_epoch_no_vepoch(self):
+        # test with all combinations of encoder/decoder lang tokens
+        with contextlib.redirect_stdout(StringIO()):
+            enc_ltok_flag = ["--encoder-langtok", "src"]
+            dec_ltok_flag = ["--decoder-langtok"]
+            with tempfile.TemporaryDirectory(
+                "test_translation_multi_simple_epoch_dict"
+            ) as data_dir:
+                create_dummy_data(data_dir)
+                preprocess_translation_data(data_dir, extra_flags=[])
+                train_translation_model(
+                    data_dir,
+                    arch="transformer",
+                    task="translation_multi_simple_epoch",
+                    extra_flags=[
+                        "--encoder-layers",
+                        "2",
+                        "--decoder-layers",
+                        "2",
+                        "--encoder-embed-dim",
+                        "8",
+                        "--decoder-embed-dim",
+                        "8",
+                        "--sampling-method",
+                        "temperature",
+                        "--sampling-temperature",
+                        "1.5",
+                    ]
+                    + enc_ltok_flag
+                    + dec_ltok_flag,
+                    lang_flags=["--lang-pairs", "in-out"],
+                    run_validation=True,
+                    extra_valid_flags=enc_ltok_flag + dec_ltok_flag,
+                )
+                generate_main(
+                    data_dir,
+                    extra_flags=[
+                        "--task",
+                        "translation_multi_simple_epoch",
+                        "--lang-pairs",
+                        "in-out",
+                        "--source-lang",
+                        "in",
+                        "--target-lang",
+                        "out",
+                    ]
+                    + enc_ltok_flag
+                    + dec_ltok_flag,
+                )
+
     def test_translation_multi_simple_epoch_dicts(self):
         # test with all combinations of encoder/decoder lang tokens
         with contextlib.redirect_stdout(StringIO()):
@@ -434,9 +495,7 @@ class TestTranslation(unittest.TestCase):
                 "test_translation_multi_simple_epoch_dict"
             ) as data_dir:
                 create_dummy_data(data_dir)
-                preprocess_translation_data(
-                    data_dir, extra_flags=[]
-                )
+                preprocess_translation_data(data_dir, extra_flags=[])
                 train_translation_model(
                     data_dir,
                     arch="transformer",
@@ -536,11 +595,17 @@ class TestTranslation(unittest.TestCase):
                         "0",
                     ],
                     run_validation=True,
-                    extra_valid_flags=["--user-dir", "examples/pointer_generator/pointer_generator_src"],
+                    extra_valid_flags=[
+                        "--user-dir",
+                        "examples/pointer_generator/pointer_generator_src",
+                    ],
                 )
                 generate_main(
                     data_dir,
-                    extra_flags=["--user-dir", "examples/pointer_generator/pointer_generator_src"],
+                    extra_flags=[
+                        "--user-dir",
+                        "examples/pointer_generator/pointer_generator_src",
+                    ],
                 )
 
     def test_lightconv(self):
@@ -842,6 +907,38 @@ class TestTranslation(unittest.TestCase):
                 )
                 generate_main(data_dir)
 
+    def test_transformer_layerdrop(self):
+        with contextlib.redirect_stdout(StringIO()):
+            with tempfile.TemporaryDirectory("test_transformer_layerdrop") as data_dir:
+                create_dummy_data(data_dir)
+                preprocess_translation_data(data_dir)
+                train_translation_model(
+                    data_dir,
+                    "transformer_iwslt_de_en",
+                    [
+                        "--encoder-layers",
+                        "3",
+                        "--decoder-layers",
+                        "3",
+                        "--encoder-embed-dim",
+                        "8",
+                        "--decoder-embed-dim",
+                        "8",
+                        "--encoder-layerdrop",
+                        "0.01",
+                        "--decoder-layerdrop",
+                        "0.01",
+                    ],
+                )
+                generate_main(data_dir)
+                generate_main(
+                    data_dir,
+                    [
+                        "--model-overrides",
+                        "{'encoder_layers_to_keep':'0,2','decoder_layers_to_keep':'1'}",
+                    ],
+                )
+
 
 class TestStories(unittest.TestCase):
     def setUp(self):
@@ -951,6 +1048,39 @@ class TestLanguageModeling(unittest.TestCase):
                     run_validation=True,
                 )
                 eval_lm_main(data_dir)
+                eval_lm_main(data_dir, extra_flags=["--context-window", "25"])
+                generate_main(
+                    data_dir,
+                    [
+                        "--task",
+                        "language_modeling",
+                        "--sample-break-mode",
+                        "eos",
+                        "--tokens-per-sample",
+                        "500",
+                    ],
+                )
+
+    def test_transformer_lm_with_adaptive_softmax(self):
+        with contextlib.redirect_stdout(StringIO()):
+            with tempfile.TemporaryDirectory(
+                "test_transformer_lm_with_adaptive_softmax"
+            ) as data_dir:
+                create_dummy_data(data_dir)
+                preprocess_lm_data(data_dir)
+                train_language_model(
+                    data_dir,
+                    "transformer_lm",
+                    [
+                        "--add-bos-token",
+                        "--criterion",
+                        "adaptive_loss",
+                        "--adaptive-softmax-cutoff",
+                        "5,10,15",
+                    ],
+                    run_validation=True,
+                )
+                eval_lm_main(data_dir)
                 generate_main(
                     data_dir,
                     [
@@ -1034,6 +1164,36 @@ class TestLanguageModeling(unittest.TestCase):
                         "500",
                     ],
                 )
+
+    @unittest.skipIf(not has_hf_transformers, "skip test if transformers is missing")
+    def test_transformer_xl_bptt_lm(self):
+        with contextlib.redirect_stdout(StringIO()):
+            with tempfile.TemporaryDirectory("test_transformer_xl_bptt_lm") as data_dir:
+                create_dummy_data(data_dir)
+                preprocess_lm_data(data_dir)
+                task_flags = [
+                    "--user-dir",
+                    "examples/truncated_bptt",
+                    "--task",
+                    "truncated_bptt_lm",
+                    "--batch-size",
+                    "2",
+                    "--tokens-per-sample",
+                    "50",
+                ]
+                train_language_model(
+                    data_dir=data_dir,
+                    arch="transformer_xl",
+                    extra_flags=task_flags
+                    + [
+                        "--n-layer",
+                        "2",
+                    ],
+                    task="truncated_bptt_lm",
+                    run_validation=True,
+                    extra_valid_flags=task_flags,
+                )
+                eval_lm_main(data_dir, extra_flags=task_flags)
 
 
 class TestMaskedLanguageModel(unittest.TestCase):
@@ -1280,7 +1440,7 @@ def train_legacy_masked_language_model(data_dir, arch, extra_args=()):
             "0.5",
             "--lr",
             "0.0001",
-            "--min-lr",
+            "--stop-min-lr",
             "1e-09",
             # dropout, attention args
             "--dropout",
@@ -1361,6 +1521,65 @@ class TestOptimizers(unittest.TestCase):
                         ],
                     )
                     generate_main(data_dir)
+
+
+def read_last_log_entry(
+    logs: List[logging.LogRecord], logger_name: str
+) -> Dict[str, float]:
+    for x in reversed(logs):
+        if x.name == logger_name:
+            return json.loads(x.message)
+    raise ValueError(f"No entries from {logger_name} found in captured logs")
+
+
+class TestActivationCheckpointing(unittest.TestCase):
+    def test_activation_checkpointing_does_not_change_metrics(self):
+        """--checkpoint-activations should not change loss"""
+        base_flags = [
+            "--encoder-layers",
+            "2",
+            "--decoder-layers",
+            "2",
+            "--encoder-embed-dim",
+            "8",
+            "--decoder-embed-dim",
+            "8",
+            "--restore-file",
+            "x.pt",
+            "--log-format",
+            "json",
+            "--log-interval",
+            "1",
+            "--max-update",
+            "2",
+        ]
+
+        def _train(extra_flags):
+            with self.assertLogs() as logs:
+                train_translation_model(
+                    data_dir,
+                    "transformer_iwslt_de_en",
+                    base_flags + extra_flags,
+                    run_validation=True,
+                    extra_valid_flags=["--log-format", "json"],
+                )
+            return logs.records
+
+        with tempfile.TemporaryDirectory("test_transformer_with_act_cpt") as data_dir:
+
+            create_dummy_data(data_dir, num_examples=20)
+            preprocess_translation_data(data_dir)
+            ckpt_logs = _train(["--checkpoint-activations"])
+            baseline_logs = _train([])
+            assert len(baseline_logs) == len(ckpt_logs)
+
+            baseline_train_stats = read_last_log_entry(baseline_logs, "train")
+            ckpt_train_stats = read_last_log_entry(ckpt_logs, "train")
+            assert baseline_train_stats["train_loss"] == ckpt_train_stats["train_loss"]
+
+            baseline_valid_stats = read_last_log_entry(baseline_logs, "valid")
+            ckpt_valid_stats = read_last_log_entry(ckpt_logs, "valid")
+            assert baseline_valid_stats["valid_loss"] == ckpt_valid_stats["valid_loss"]
 
 
 def create_dummy_roberta_head_data(
@@ -1478,13 +1697,20 @@ def train_roberta_head(data_dir, arch, num_classes=2, extra_flags=None):
     train.main(train_args)
 
 
-def train_language_model(data_dir, arch, extra_flags=None, run_validation=False):
+def train_language_model(
+    data_dir,
+    arch,
+    extra_flags=None,
+    run_validation=False,
+    extra_valid_flags=None,
+    task="language_modeling",
+):
     train_parser = options.get_training_parser()
     train_args = options.parse_args_and_arch(
         train_parser,
         [
             "--task",
-            "language_modeling",
+            task,
             data_dir,
             "--arch",
             arch,
@@ -1492,10 +1718,6 @@ def train_language_model(data_dir, arch, extra_flags=None, run_validation=False)
             "adam",
             "--lr",
             "0.0001",
-            "--criterion",
-            "adaptive_loss",
-            "--adaptive-softmax-cutoff",
-            "5,10,15",
             "--max-tokens",
             "500",
             "--tokens-per-sample",
@@ -1523,7 +1745,7 @@ def train_language_model(data_dir, arch, extra_flags=None, run_validation=False)
             validate_parser,
             [
                 "--task",
-                "language_modeling",
+                task,
                 data_dir,
                 "--path",
                 os.path.join(data_dir, "checkpoint_last.pt"),
@@ -1534,12 +1756,13 @@ def train_language_model(data_dir, arch, extra_flags=None, run_validation=False)
                 "--no-progress-bar",
                 "--num-workers",
                 "0",
-            ],
+            ]
+            + (extra_valid_flags or []),
         )
         validate.main(validate_args)
 
 
-def eval_lm_main(data_dir):
+def eval_lm_main(data_dir, extra_flags=None):
     eval_lm_parser = options.get_eval_lm_parser()
     eval_lm_args = options.parse_args_and_arch(
         eval_lm_parser,
@@ -1550,75 +1773,10 @@ def eval_lm_main(data_dir):
             "--no-progress-bar",
             "--num-workers",
             "0",
-        ],
+        ]
+        + (extra_flags or []),
     )
     eval_lm.main(eval_lm_args)
-
-
-def train_masked_language_model(data_dir, arch, extra_args=()):
-    train_parser = options.get_training_parser()
-    # TODO: langs should be in and out right?
-    train_args = options.parse_args_and_arch(
-        train_parser,
-        [
-            "--task",
-            "cross_lingual_lm",
-            data_dir,
-            "--arch",
-            arch,
-            # Optimizer args
-            "--optimizer",
-            "adam",
-            "--lr-scheduler",
-            "reduce_lr_on_plateau",
-            "--lr-shrink",
-            "0.5",
-            "--lr",
-            "0.0001",
-            "--min-lr",
-            "1e-09",
-            # dropout, attention args
-            "--dropout",
-            "0.1",
-            "--attention-dropout",
-            "0.1",
-            # MLM args
-            "--criterion",
-            "masked_lm_loss",
-            "--masked-lm-only",
-            "--monolingual-langs",
-            "in,out",
-            "--num-segment",
-            "5",
-            # Transformer args: use a small transformer model for fast training
-            "--encoder-layers",
-            "1",
-            "--encoder-embed-dim",
-            "32",
-            "--encoder-attention-heads",
-            "1",
-            "--encoder-ffn-embed-dim",
-            "32",
-            # Other training args
-            "--max-tokens",
-            "500",
-            "--tokens-per-sample",
-            "500",
-            "--save-dir",
-            data_dir,
-            "--max-epoch",
-            "1",
-            "--no-progress-bar",
-            "--distributed-world-size",
-            "1",
-            "--dataset-impl",
-            "raw",
-            "--num-workers",
-            "0",
-        ]
-        + list(extra_args),
-    )
-    train.main(train_args)
 
 
 if __name__ == "__main__":
