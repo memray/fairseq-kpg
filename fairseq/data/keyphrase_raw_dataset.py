@@ -4,16 +4,11 @@
 # LICENSE file in the root directory of this source tree.
 import json
 from functools import lru_cache
-import os
-import shutil
-import struct
 
 import numpy as np
-import torch
 
-from fairseq.tasks import keyphrasification
+from fairseq.tasks.keyphrasification_utils import KP_DATASET_FIELDS
 from . import FairseqDataset
-from fairseq.data.fasta_dataset import FastaDataset
 from fairseq.file_io import PathManager
 
 
@@ -29,7 +24,7 @@ class KeyphraseRawDataset(FairseqDataset):
         self.dataset_type = dataset_type
 
         self.example_dicts = None
-        self._sizes = None
+        self.ex_sizes = None
         self._size = None
 
 
@@ -43,20 +38,22 @@ class KeyphraseRawDataset(FairseqDataset):
             dataset_type = 'news'
         elif 'kp20k' in filepath or 'magkp' in filepath:
             dataset_type = 'scipaper'
+        elif 'wiki' in filepath:
+            dataset_type = 'wiki'
 
         assert dataset_type is not None, 'Fail to detect the data type of the given input file.' \
-                                         'Accecpted values:' + keyphrasification.KP_DATASET_FIELDS.keys()
+                                         'Accecpted values:' + KP_DATASET_FIELDS.keys()
 
-        print('Automatically detect the input data type as ' + dataset_type.upper())
+        # print('Automatically detect the input data type as ' + dataset_type.upper())
 
         return dataset_type
 
     def read_data(self, filepath):
-        print('Loading data from ' + filepath)
         ex_dicts = []
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f: ex_dicts.append(json.loads(line))
 
+        # print('Loaded %d data from: %s' % (len(ex_dicts), filepath))
         return ex_dicts
 
     def check_index(self, i):
@@ -89,11 +86,14 @@ class KeyphraseRawDataset(FairseqDataset):
 
     @property
     def sizes(self):
-        if not self._sizes:
-            title_field, text_field, _, _ = keyphrasification.KP_DATASET_FIELDS[self.dataset_type]
-            self._sizes = np.asarray([len(l[title_field].split() + l[text_field].split()) for l in self.all_examples])
+        if self.ex_sizes is None:
+            title_field, text_field, _, _ = KP_DATASET_FIELDS[self.dataset_type]
+            if title_field:
+                self.ex_sizes = np.asarray([len(l[title_field].split() + l[text_field].split()) for l in self.all_examples])
+            else:
+                self.ex_sizes = np.asarray([len(l[text_field].split()) for l in self.all_examples])
 
-        return self._sizes
+        return self.ex_sizes
 
     @property
     def all_examples(self):
@@ -105,3 +105,7 @@ class KeyphraseRawDataset(FairseqDataset):
     @staticmethod
     def exists(path):
         return PathManager.exists(path)
+
+    @property
+    def supports_prefetch(self):
+        return False

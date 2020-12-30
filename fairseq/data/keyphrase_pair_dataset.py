@@ -45,29 +45,18 @@ class KeyphrasePairDataset(FairseqDataset):
             source/target sentence.
         num_buckets (int, optional): if set to a value greater than 0, then
             batches will be bucketed into the given number of batch shapes.
-        src_lang_id (int, optional): source language ID, if set, the collated batch
-            will contain a field 'src_lang_id' in 'net_input' which indicates the
-            source language of the samples.
-        tgt_lang_id (int, optional): target language ID, if set, the collated batch
-            will contain a field 'tgt_lang_id' which indicates the target language
-             of the samples.
     """
 
     def __init__(
         self, src, src_dict, src_sizes,
         text_tokenizer, parse_fn,
         tgt=None, tgt_dict=None, tgt_sizes=None,
-        kp_concat_type=None,
         shuffle=True, input_feeding=True,
         left_pad_source=False, left_pad_target=False,
-        add_special_tokens_source=False, add_special_tokens_target=False,
         max_source_length=None, max_target_length=None,
-        src_lang_id=None,
-        tgt_lang_id=None,
         num_buckets=0,
         pad_to_multiple=1,
     ):
-        assert kp_concat_type is not None, "kp_concat_type must be assigned"
         if tgt_dict is not None:
             assert src_dict.pad() == tgt_dict.pad()
             assert src_dict.eos() == tgt_dict.eos()
@@ -87,12 +76,8 @@ class KeyphrasePairDataset(FairseqDataset):
         self.left_pad_target = left_pad_target
         self.shuffle = shuffle
         self.input_feeding = input_feeding
-        self.add_special_tokens_source = add_special_tokens_source
-        self.add_special_tokens_target = add_special_tokens_target
         self.max_source_length = max_source_length
         self.max_target_length = max_target_length
-        self.src_lang_id = src_lang_id
-        self.tgt_lang_id = tgt_lang_id
         if num_buckets > 0:
             from fairseq.data import BucketPadLengthDataset
             self.src = BucketPadLengthDataset(
@@ -170,7 +155,7 @@ class KeyphrasePairDataset(FairseqDataset):
         #    <s> (the BOS token) and </s> (the SEP token), with two </s></s> as the separator."
         if self.max_source_length is None:
             src_tokens = self.text_tokenizer([s['source'] for s in samples],
-                                             add_special_tokens=False) # disable add <bos> and <eos>
+                                             add_special_tokens=False) # add <bos> and <eos> later
         else:
             src_tokens = self.text_tokenizer([s['source'] for s in samples],
                                              add_special_tokens=False,
@@ -327,13 +312,6 @@ class KeyphrasePairDataset(FairseqDataset):
             getattr(self.src, 'supports_prefetch', False)
             and (getattr(self.tgt, 'supports_prefetch', False) or self.tgt is None)
         )
-
-    def prefetch(self, indices):
-        self.src.prefetch(indices)
-        if self.tgt is not None:
-            self.tgt.prefetch(indices)
-        if self.align_dataset is not None:
-            self.align_dataset.prefetch(indices)
 
     def filter_indices_by_size(self, indices, max_sizes):
         """ Filter a list of sample indices. Remove those that are longer

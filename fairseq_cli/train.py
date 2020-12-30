@@ -64,8 +64,9 @@ def main(cfg: DictConfig) -> None:
     # Setup task, e.g., translation, language modeling, etc.
     task = tasks.setup_task(cfg.task)
     # Load valid dataset (we load training data below, based on the latest checkpoint)
-    for valid_sub_split in cfg.dataset.valid_subset.split(","):
-        task.load_dataset(valid_sub_split, combine=False, epoch=1)
+    if not cfg.dataset.disable_validation:
+        for valid_sub_split in cfg.dataset.valid_subset.split(","):
+            task.load_dataset(valid_sub_split, combine=False, epoch=1)
 
     assert cfg.criterion, "Please specify criterion to train a model"
 
@@ -375,12 +376,7 @@ def validate(
             ),
             default_log_format=("tqdm" if not cfg.common.no_progress_bar else "simple"),
             wandb_project=(
-                cfg.common.wandb_project
-                if distributed_utils.is_master(cfg.distributed_training)
-                else None
-            ),
-            wandb_run_name=os.environ.get(
-                "WANDB_NAME", os.path.basename(cfg.checkpoint.save_dir)
+                cfg.common.wandb_project if distributed_utils.is_master(cfg.distributed_training) else None
             ),
         )
 
