@@ -274,7 +274,7 @@ def validate_and_save(
     end_of_epoch: bool,
 ) -> Tuple[List[Optional[float]], bool]:
     num_updates = trainer.get_num_updates()
-    max_update = cfg.optimization.total_num_update or math.inf # was cfg.optimization.max_update, a bug?
+    max_update = cfg.optimization.max_update or math.inf # was cfg.optimization.max_update, a bug?
 
     # Stopping conditions (and an additional one based on validation loss later
     # on)
