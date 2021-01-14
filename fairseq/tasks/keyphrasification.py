@@ -150,16 +150,20 @@ class KeyphrasificationTask(LegacyFairseqTask):
                             help='(for processing data) max number of tokens in source')
         parser.add_argument('--max-target-length', default=128, type=int, metavar='N',
                             help='(for processing data) max number of tokens in target')
+
+        parser.add_argument('--max-phrase-len', default=8, type=int, metavar='N',
+                            help='filter short phrases. used in pretrain code.')
         parser.add_argument('--max-target-phrases', default=-1, type=int, metavar='N',
                             help='max number of phrases in target. If exceeds, random max_num phrases will be used.'
                                  'If -1, all phrases will be retained.')
+
         parser.add_argument('--max-source-positions', default=1024, type=int, metavar='N',
                             help='(for initializing model embeddings) max number of tokens in the source sequence')
         parser.add_argument('--max-target-positions', default=1024, type=int, metavar='N',
                             help='(initializing model embeddings) max number of tokens in the target sequence')
         parser.add_argument('--upsample-primary', default=1, type=int,
                             help='amount to upsample primary dataset')
-        parser.add_argument('--lowercase', default='True', type=str, metavar='BOOL',
+        parser.add_argument('--lowercase', default='False', type=str, metavar='BOOL',
                             help='lowercase all texts (uncased)')
         parser.add_argument('--num-batch-buckets', default=0, type=int, metavar='N',
                             help='if >0, then bucket source and target lengths into N '
@@ -212,6 +216,7 @@ class KeyphrasificationTask(LegacyFairseqTask):
         """
         args.left_pad_source = utils.eval_bool(args.left_pad_source)
         args.left_pad_target = utils.eval_bool(args.left_pad_target)
+        args.lowercase = utils.eval_bool(args.lowercase)
 
         paths = utils.split_paths(args.data)
         assert len(paths) > 0

@@ -15,7 +15,7 @@ from fairseq.data.keyphrase_raw_dataset import KeyphraseRawDataset
 from fairseq.tasks import register_task, LegacyFairseqTask
 from fairseq.tasks.keyphrasification import KeyphrasificationTask, load_kppair_dataset
 from fairseq.tasks.keyphrasification_utils import parse_src_fn, KP_DATASET_FIELDS, KP_CONCAT_TYPES, \
-    obtain_sorted_indices
+    obtain_sorted_indices, extract_phrases, wiki_ex_parse_fn
 from fairseq.utils import logger
 
 
@@ -46,6 +46,10 @@ class KeyphrasificationPretrainTask(KeyphrasificationTask):
         # fmt: off
         KeyphrasificationTask.add_args(parser)
         parser.add_argument("--source-only", default='False', type=str, metavar='BOOL',
+                            help='.')
+        parser.add_argument("--phrase-corr-rate", default=0.0, type=float,
+                            help='.')
+        parser.add_argument("--random-span-rate", default=0.0, type=float,
                             help='.')
         # fmt: on
 
@@ -78,23 +82,15 @@ class KeyphrasificationPretrainTask(KeyphrasificationTask):
             left_pad_target=self.args.left_pad_target,
             max_source_length=self.args.max_source_length,
             max_target_length=self.args.max_target_length,
+            max_phrase_len=self.args.max_phrase_len,
             max_target_phrases=self.args.max_target_phrases,
+            phrase_corr_rate=self.args.phrase_corr_rate,
+            random_span_rate=self.args.random_span_rate,
             num_buckets=self.args.num_batch_buckets,
             shuffle=(split.startswith('train')),
             pad_to_multiple=self.args.required_seq_len_multiple,
             lowercase=self.args.lowercase
         )
-
-
-def wiki_ex_parse_fn(ex_dict, tokenizer, max_target_phrases=-1, lowercase=False):
-    title_field, text_field = '', 'text'
-
-    src_str = ex_dict[text_field]
-    tgt_str = ex_dict[text_field]
-
-    if lowercase:
-        return src_str.lower(), tgt_str.lower()
-    return src_str, tgt_str
 
 
 def load_pretrain_dataset(
@@ -103,7 +99,10 @@ def load_pretrain_dataset(
         upsample_primary,
         left_pad_source, left_pad_target,
         max_source_length, max_target_length,
+        max_phrase_len,
         max_target_phrases,
+        phrase_corr_rate,
+        random_span_rate,
         num_buckets=0,
         shuffle=True,
         pad_to_multiple=1,
@@ -140,8 +139,20 @@ def load_pretrain_dataset(
         sample_ratios[0] = upsample_primary
         raw_dataset = ConcatDataset(raw_datasets, sample_ratios)
 
-    parse_fn = partial(wiki_ex_parse_fn, tokenizer=text_tokenizer,
-                       max_target_phrases=max_target_phrases, lowercase=lowercase)
+    # span distribution follows SpanBERT (https://arxiv.org/pdf/1907.10529.pdf)
+    span_lens = list(range(1, 8 + 1))
+    geometric_p = 0.2
+    len_distrib = [geometric_p * (1 - geometric_p) ** (i - 1) for i in
+                        range(1, 8 + 1)] if geometric_p >= 0 else None
+    len_distrib = [x / (sum(len_distrib)) for x in len_distrib]
+
+    parse_fn = partial(wiki_ex_parse_fn,
+                       sep_token=text_tokenizer.sep_token,
+                       max_phrase_len=max_phrase_len,
+                       max_target_phrases=max_target_phrases,
+                       phrase_corr_rate=phrase_corr_rate,
+                       random_span_rate=random_span_rate, span_len_opts=span_lens, len_distrib=len_distrib,
+                       lowercase=lowercase)
 
     return KeyphrasePairDataset(
         raw_dataset, src_dict=dictionary, src_sizes=raw_dataset.sizes,

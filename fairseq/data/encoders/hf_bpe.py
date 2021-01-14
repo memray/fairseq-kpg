@@ -41,7 +41,10 @@ class HuggingFacePretrainedBPE(object):
         # initialize a slow tokenizer and convert it to fast, so that special tokens can be properly segmented
         # hard-code <sep>
         sep_token = '<sep>'
-        kp_special_tokens = ['<present>', '<absent>', '<category>']
+        kp_special_tokens = ['<present>', '<absent>',
+                             '<category>', '<infill>', '<seealso>', '<header>',
+                             '<|endoftext|>', '<sep>', '<mask>']
+
         tokenizer = RobertaTokenizer(vocab_file=args.bpe_vocab,
                                      merges_file=args.bpe_merges,
                                      sep=sep_token,  # doesn't matter
