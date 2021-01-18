@@ -63,7 +63,6 @@ def register_task(name, dataclass=None):
     Args:
         name (str): the name of the task
     """
-
     def register_task_cls(cls):
         if name in TASK_REGISTRY:
             raise ValueError("Cannot register duplicate task ({})".format(name))

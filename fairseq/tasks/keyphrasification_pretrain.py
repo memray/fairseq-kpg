@@ -12,7 +12,7 @@ from fairseq.data import ConcatDataset
 from fairseq.data.keyphrase_pair_dataset import KeyphrasePairDataset
 from fairseq.data.keyphrase_raw_dataset import KeyphraseRawDataset
 
-from fairseq.tasks import register_task, LegacyFairseqTask
+from . import register_task
 from fairseq.tasks.keyphrasification import KeyphrasificationTask, load_kppair_dataset
 from fairseq.tasks.keyphrasification_utils import parse_src_fn, KP_DATASET_FIELDS, KP_CONCAT_TYPES, \
     obtain_sorted_indices, extract_phrases, wiki_ex_parse_fn

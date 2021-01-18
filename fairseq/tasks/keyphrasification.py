@@ -18,7 +18,8 @@ from fairseq.data.encoders.hf_bpe import HuggingFacePretrainedBPE
 from fairseq.data.keyphrase_pair_dataset import KeyphrasePairDataset
 from fairseq.data.keyphrase_raw_dataset import KeyphraseRawDataset
 
-from fairseq.tasks import register_task, LegacyFairseqTask
+from . import register_task
+from fairseq.tasks import LegacyFairseqTask
 from fairseq.tasks.keyphrasification_utils import KP_DATASET_FIELDS, KP_CONCAT_TYPES, kpdict_parse_fn
 
 logger = logging.getLogger(__name__)

@@ -14,9 +14,10 @@ With A100*8, expect max-tokens=512*4=2048, update-freq=4, the dynamic batch size
 
 
 ## Commands
-cd /home/ubuntu/efs/rum20/exps/
+cd ~/efs/rum20/exps/
+chmod +x ../fairseq-kpg/run/pretrain_1gpu.sh
 nohup ../fairseq-kpg/run/pretrain_1gpu.sh > pretrain_1gpu.log &
-
+2727
 
 ## A100
 export TOKENIZERS_PARALLELISM=false
