@@ -37,6 +37,8 @@ def load_kppair_dataset(
     shuffle=True,
     pad_to_multiple=1,
     lowercase=False,
+    seed=0,
+    epoch=0,
     dataset_type=None
 ):
     src_datasets = []
@@ -91,7 +93,8 @@ def load_kppair_dataset(
         dataset_type = src_dataset.dataset_type
     parse_fn = partial(kpdict_parse_fn, tokenizer=text_tokenizer,
                        kp_concat_type=kp_concat_type, dataset_type=dataset_type,
-                       max_target_phrases=max_target_phrases, lowercase=lowercase)
+                       max_target_phrases=max_target_phrases, lowercase=lowercase,
+                       seed=seed + epoch if shuffle else 0)
     return KeyphrasePairDataset(
         src_dataset, src_dict=dictionary, src_sizes=src_dataset.sizes,
         text_tokenizer=text_tokenizer, parse_fn=parse_fn,
@@ -189,7 +192,7 @@ class KeyphrasificationTask(LegacyFairseqTask):
         else:
             raise NotImplementedError('Unsupported tokenizer %s' % args.tokenizer)
 
-        # Lsoad dictionaries, see https://github.com/pytorch/fairseq/issues/1432
+        # Load dictionaries, see https://github.com/pytorch/fairseq/issues/1432
         dictionary = self.load_dictionary(args.dict_path)
         # Note that in vocab.txt, madeupword0001 is replaced with <sep>.
         #   It seems other special tokens like <present> don't need explicit setting.
@@ -251,7 +254,9 @@ class KeyphrasificationTask(LegacyFairseqTask):
             num_buckets=self.args.num_batch_buckets,
             shuffle=(split != 'test'),
             pad_to_multiple=self.args.required_seq_len_multiple,
-            lowercase=self.args.lowercase
+            lowercase=self.args.lowercase,
+            seed=self.args.seed,
+            epoch=epoch
         )
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):

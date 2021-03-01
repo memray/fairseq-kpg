@@ -7,6 +7,8 @@ import re
 
 import numpy as np
 
+from fairseq.data import data_utils
+
 KP_CONCAT_TYPES = ['one2one', 'random',
                    'pres_abs', 'abs_pres',
                    'nosort', 'nosort_reverse',
@@ -63,7 +65,8 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
                      random_span_rate=0.0,
                      span_len_opts=None,
                      len_distrib=None,
-                     lowercase=False):
+                     lowercase=False,
+                     seed=0):
     """
     max_tgt_len=max_phrase_len*max_target_phrases + src_len*random_span_rate = 6*16+512*5%=96+25.6=121.6
     masked_word=6*8*0.1+512*5%=30.4 (30.4/512=5.9%)
@@ -93,91 +96,93 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
         category_phrases = [p for p in category_phrases if len(p.split()) <= max_phrase_len]
         seealso_phrases = [p for p in seealso_phrases if len(p.split()) <= max_phrase_len]
 
-    # present phrases
-    if max_target_phrases > 0 and len(pres_phrases) > max_target_phrases / 2:
-        pres_phrases = random.sample(pres_phrases, int(max_target_phrases / 2))
+    with data_utils.numpy_seed(seed):
 
-    num_pres = len(pres_phrases)
-    num_header = len(header_phrases)
-    num_cat = len(category_phrases)
-    num_seealso = len(seealso_phrases)
+        # present phrases
+        if max_target_phrases > 0 and len(pres_phrases) > max_target_phrases / 2:
+            pres_phrases = random.sample(pres_phrases, int(max_target_phrases / 2))
 
-    # absent phrases
-    abs_phrases = header_phrases + category_phrases + seealso_phrases
-    if max_target_phrases > 0 and len(abs_phrases) > max_target_phrases / 2:
-        num_cat = min(len(category_phrases), random.randint(0, int(max_target_phrases / 2 - len(header_phrases))))
-        num_seealso = min(len(seealso_phrases), int(max_target_phrases / 2) - len(header_phrases) - num_cat)
-        abs_phrases = header_phrases \
-                      + random.sample(category_phrases, num_cat) \
-                      + random.sample(seealso_phrases, num_seealso)
+        num_pres = len(pres_phrases)
+        num_header = len(header_phrases)
+        num_cat = len(category_phrases)
+        num_seealso = len(seealso_phrases)
 
-    # mask random spans
-    num_infill = 0
-    if random_span_rate > 0.0:
-        src_tokens = src_text.split()
-        num_word_left = max(1, int(random_span_rate * len(src_tokens)))
+        # absent phrases
+        abs_phrases = header_phrases + category_phrases + seealso_phrases
+        if max_target_phrases > 0 and len(abs_phrases) > max_target_phrases / 2:
+            num_cat = min(len(category_phrases), random.randint(0, int(max_target_phrases / 2 - len(header_phrases))))
+            num_seealso = min(len(seealso_phrases), int(max_target_phrases / 2) - len(header_phrases) - num_cat)
+            abs_phrases = header_phrases \
+                          + random.sample(category_phrases, num_cat) \
+                          + random.sample(seealso_phrases, num_seealso)
 
-        span_lens = []
-        while num_word_left > 0:
-            span_len = np.random.choice(span_len_opts, p=len_distrib)
-            if span_len <= num_word_left:
-                span_lens.append(span_len)
-            else:
-                span_lens.append(num_word_left)
-            num_word_left -= span_len
-        span_lens = sorted(span_lens, reverse=True) # ensure larger spans get processed first
+        # mask random spans
+        num_infill = 0
+        if random_span_rate > 0.0:
+            src_tokens = src_text.split()
+            num_word_left = max(1, int(random_span_rate * len(src_tokens)))
 
-        spans = []
-        uncovered_spans = [(0, len(src_tokens))]
-        for span_len in span_lens:
-            candicate_spans, noncandicate_spans = [], []
-            for s in uncovered_spans:
-                if s[1] - s[0] >= span_len:
-                    candicate_spans.append(s)
+            span_lens = []
+            while num_word_left > 0:
+                span_len = np.random.choice(span_len_opts, p=len_distrib)
+                if span_len <= num_word_left:
+                    span_lens.append(span_len)
                 else:
-                    noncandicate_spans.append(s)
+                    span_lens.append(num_word_left)
+                num_word_left -= span_len
+            span_lens = sorted(span_lens, reverse=True) # ensure larger spans get processed first
 
-            if len(candicate_spans) == 0:
-                # not possible to fit this span
-                continue
-            candicate_span_id = random.choice(range(len(candicate_spans)))
-            candicate_span = candicate_spans[candicate_span_id]
-            candicate_span_len = candicate_span[1] - candicate_span[0]
+            spans = []
+            uncovered_spans = [(0, len(src_tokens))]
+            for span_len in span_lens:
+                candicate_spans, noncandicate_spans = [], []
+                for s in uncovered_spans:
+                    if s[1] - s[0] >= span_len:
+                        candicate_spans.append(s)
+                    else:
+                        noncandicate_spans.append(s)
 
-            # sample a span start given the candidate
-            span_start_offset = random.randint(0, candicate_span_len - span_len + 1)
-            span_left = candicate_span[0] + span_start_offset
-            spans.append((span_left, span_left + span_len))
+                if len(candicate_spans) == 0:
+                    # not possible to fit this span
+                    continue
+                candicate_span_id = random.choice(range(len(candicate_spans)))
+                candicate_span = candicate_spans[candicate_span_id]
+                candicate_span_len = candicate_span[1] - candicate_span[0]
 
-            # maintain the new candidate lists
-            if span_start_offset == 0:
-                leftover_spans = [(candicate_span[0] + span_len, candicate_span[1] + 1)]
-            elif span_start_offset == candicate_span_len - span_len:
-                leftover_spans = [(candicate_span[0], candicate_span[1] - span_len)]
-            else:
-                leftover_spans = [(candicate_span[0], span_left), (span_left + span_len, candicate_span[1] + 1)]
+                # sample a span start given the candidate
+                span_start_offset = random.randint(0, candicate_span_len - span_len + 1)
+                span_left = candicate_span[0] + span_start_offset
+                spans.append((span_left, span_left + span_len))
 
-            uncovered_spans = noncandicate_spans + leftover_spans
+                # maintain the new candidate lists
+                if span_start_offset == 0:
+                    leftover_spans = [(candicate_span[0] + span_len, candicate_span[1] + 1)]
+                elif span_start_offset == candicate_span_len - span_len:
+                    leftover_spans = [(candicate_span[0], candicate_span[1] - span_len)]
+                else:
+                    leftover_spans = [(candicate_span[0], span_left), (span_left + span_len, candicate_span[1] + 1)]
 
-        spans = sorted(spans, key=lambda x: x[0], reverse=False)
-        masked_src_tokens = []
-        prev_span_end = 0
-        for s in spans:
-            masked_src_tokens.extend(src_tokens[prev_span_end: s[0]])
-            masked_src_tokens.append('<infill>')
-            prev_span_end = s[1]
-        masked_src_tokens.extend(src_tokens[prev_span_end:])
+                uncovered_spans = noncandicate_spans + leftover_spans
 
-        infill_phrases = [' '.join(src_tokens[s[0]: s[1]]) for s in spans]
-        num_infill = len(infill_phrases)
-        src_text = ' '.join(masked_src_tokens)
+            spans = sorted(spans, key=lambda x: x[0], reverse=False)
+            masked_src_tokens = []
+            prev_span_end = 0
+            for s in spans:
+                masked_src_tokens.extend(src_tokens[prev_span_end: s[0]])
+                masked_src_tokens.append('<infill>')
+                prev_span_end = s[1]
+            masked_src_tokens.extend(src_tokens[prev_span_end:])
 
-    # mask random present phrases
-    if phrase_corr_rate > 0.0 and len(pres_phrases) > 0:
-        num_mask_kp = min(1, int(len(pres_phrases) * phrase_corr_rate))
-        mask_pres_phrases = random.sample(pres_phrases, num_mask_kp)
-        for p in mask_pres_phrases:
-            src_text = re.sub(p, '<present>', src_text, flags=re.IGNORECASE)
+            infill_phrases = [' '.join(src_tokens[s[0]: s[1]]) for s in spans]
+            num_infill = len(infill_phrases)
+            src_text = ' '.join(masked_src_tokens)
+
+        # mask random present phrases
+        if phrase_corr_rate > 0.0 and len(pres_phrases) > 0:
+            num_mask_kp = min(1, int(len(pres_phrases) * phrase_corr_rate))
+            mask_pres_phrases = random.sample(pres_phrases, num_mask_kp)
+            for p in mask_pres_phrases:
+                src_text = re.sub(p, '<present>', src_text, flags=re.IGNORECASE)
 
     prefix_str = '<present>%d<header>%d<category>%d<seealso>%d<infill>%d<s>' \
                  % (num_pres, num_header, num_cat, num_seealso, num_infill)

@@ -2,6 +2,15 @@
 https://github.com/pytorch/fairseq/blob/master/examples/roberta/README.pretraining.md
 8x32GB V100 GPUs. Each GPU uses a batch size of 16 sequences ($MAX_SENTENCES) and accumulates gradients to further increase the batch size by 16x ($UPDATE_FREQ), for a total batch size of 2048 sequences.
 
+batch size | peak learning rate
+---|---
+256 | 0.0001=1e-4
+2048 | 0.0005=5e-4
+8192 | 0.0007=7e-4
+ours 64 | 1e-5
+LUKE 2048 | 1e-5
+
+
 ## Ours
 let's do 256 equivalent batch size
 
@@ -15,9 +24,20 @@ With A100*8, expect max-tokens=512*4=2048, update-freq=4, the dynamic batch size
 
 ## Commands
 cd ~/efs/rum20/exps/
-chmod +x ../fairseq-kpg/run/pretrain_1gpu.sh
-nohup ../fairseq-kpg/run/pretrain_1gpu.sh > pretrain_1gpu.log &
-2727
+nohup ~/efs/rum20/fairseq-kpg/run/pretrain_1gpu_gcp.sh > pretrain_1gpu_5e6_200k.log &
+chmod +x ../fairseq-kpg/run/pretrain_1gpu_gcp.sh
+vim ../fairseq-kpg/run/pretrain_1gpu_gcp.sh
+
+### on single A100, usage=40gb, avg_batchsize=60
+https://wandb.ai/memray/transfer_kp_wiki?workspace=user-memray
+#### diverged after an "overflow detected", try --clip-norm 0.1
+#### diverged (see gnorm and valid of https://wandb.ai/memray/transfer_kp_wiki/runs/d14hf3ma?workspace=user-memray) after around 5k steps, may because of too large learning rate. Set peak_lr=1e-5, valid_interval=2500, warm_up=5000  
+#### 1e5 looks like overfitting. Set peak_lr=1e-6, valid_interval=2000 
+#### 1e6, step=100k, eventually doesn't reach better loss
+#### try 5e6, step=200k, freq=24, warmup=10k, pid=11444
+train.py ~/efs/rum20/data/wiki/processed/json_phrase/train/ --valid-data ~/efs/rum20/data/wiki/processed/json_phrase/valid/ --validate-interval 2500 --save-dir ~/efs/rum20/exps/kppretrain_bart_wiki_lr1e5/ckpts --task keyphrasification_pretrain --max-source-length 512 --max-target-length 256 --max-phrase-len 6 --max-target-phrases 16 --phrase-corr-rate 0.1 --random-span-rate 0.05 --arch bart_large --restore-file ~/efs/rum20/data/kp/cache/bart.large/model.pt --bpe hf_pretrained_bpe --bpe-vocab ~/efs/rum20/data/kp/hf_vocab/roberta-base-kp/vocab.json --bpe-merges ~/efs/rum20/data/kp/hf_vocab/roberta-base-kp/merges.txt --dict-path ~/efs/rum20/data/kp/hf_vocab/roberta-base-kp/dict.txt --bpe-dropout 0.1 --ddp-backend=no_c10d --criterion label_smoothed_cross_entropy --share-all-embeddings --layernorm-embedding --share-all-embeddings --share-decoder-input-output-embed --reset-optimizer --reset-dataloader --reset-meters --required-batch-size-multiple 1 --optimizer adam --adam-betas (0.9,0.999) --adam-eps 1e-08 --lr 5e-6 --update-freq 10 --lr-scheduler polynomial_decay --label-smoothing 0.1 --dropout 0.1 --attention-dropout 0.1 --weight-decay 0.01 --log-format simple --log-interval 100 --seed 7 --fixed-validation-seed 7 --max-tokens 512 --clip-norm 0.1 --save-interval-updates 5000 --warmup-updates 5000 --total-num-update 200000 --num-workers 12 --find-unused-parameters --fp16 --ddp-backend=no_c10d --wandb-project transfer_kp_wiki
+
+
 
 ## A100
 export TOKENIZERS_PARALLELISM=false

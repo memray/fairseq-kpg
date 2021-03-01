@@ -89,7 +89,9 @@ class KeyphrasificationPretrainTask(KeyphrasificationTask):
             num_buckets=self.args.num_batch_buckets,
             shuffle=(split.startswith('train')),
             pad_to_multiple=self.args.required_seq_len_multiple,
-            lowercase=self.args.lowercase
+            lowercase=self.args.lowercase,
+            epoch=epoch,
+            seed=self.args.seed
         )
 
 
@@ -107,6 +109,8 @@ def load_pretrain_dataset(
         shuffle=True,
         pad_to_multiple=1,
         lowercase=False,
+        epoch=0,
+        seed=0,
         dataset_type=None
 ):
     data_files = []
@@ -121,7 +125,7 @@ def load_pretrain_dataset(
                     continue
 
                 filepath = os.path.join(root, file)
-                data_files.append(filepath)
+                _data_files.append(filepath)
 
         logger.info('Find {} shards at {}'.format(len(_data_files), data_path))
         data_files.extend(_data_files)
@@ -152,7 +156,8 @@ def load_pretrain_dataset(
                        max_target_phrases=max_target_phrases,
                        phrase_corr_rate=phrase_corr_rate,
                        random_span_rate=random_span_rate, span_len_opts=span_lens, len_distrib=len_distrib,
-                       lowercase=lowercase)
+                       lowercase=lowercase,
+                       seed=seed + epoch if shuffle else 0)
 
     return KeyphrasePairDataset(
         raw_dataset, src_dict=dictionary, src_sizes=raw_dataset.sizes,

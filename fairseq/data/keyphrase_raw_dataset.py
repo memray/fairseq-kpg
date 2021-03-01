@@ -13,9 +13,7 @@ from fairseq.file_io import PathManager
 
 
 class KeyphraseRawDataset(FairseqDataset):
-    """Modified on the basis of data.indexed_dataset.IndexedRawTextDataset
-    Takes a text file as input and binarizes it in memory at instantiation.
-    Original lines are not kept in memory"""
+    """Modified on the basis of data.indexed_dataset.IndexedRawTextDataset."""
 
     def __init__(self, filepath, dataset_type):
         self.filepath = filepath
@@ -24,8 +22,8 @@ class KeyphraseRawDataset(FairseqDataset):
         self.dataset_type = dataset_type
 
         self.example_dicts = None
-        self.ex_sizes = None
-        self._size = None
+        self.ex_sizes = None # length of each example
+        self._size = None # number of examples
 
 
     def infer_dataset_type(self, filepath):

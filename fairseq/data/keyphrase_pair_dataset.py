@@ -181,8 +181,8 @@ class KeyphrasePairDataset(FairseqDataset):
         prev_output_tokens = None
         target = None
         if samples[0].get('target', None) is not None:
-            if self.max_source_length is None:
-                src_tokens = self.text_tokenizer([s['source'] for s in samples],
+            if self.max_target_length is None:
+                tgt_tokens = self.text_tokenizer([s['target'] for s in samples],
                                                  add_special_tokens=False)
             else:
                 tgt_tokens = self.text_tokenizer([s['target'] for s in samples],
@@ -277,8 +277,12 @@ class KeyphrasePairDataset(FairseqDataset):
 
     def num_tokens(self, index):
         """Return the number of tokens in a sample. This value is used to
-        enforce ``--max-tokens`` during batching."""
-        return max(self.src_sizes[index], self.tgt_sizes[index] if self.tgt_sizes is not None else 0)
+        enforce ``--max-tokens`` during batching.
+
+        Since sequences are truncated by Huggingface Tokenizer, we cap the length by max_source_length/max_target_length.
+        """
+        return max(min(self.src_sizes[index], self.max_source_length),
+                   min(self.tgt_sizes[index], self.max_target_length) if self.tgt_sizes is not None else 0)
 
     def size(self, index):
         """Return an example's size as a float or tuple. This value is used when
@@ -314,8 +318,8 @@ class KeyphrasePairDataset(FairseqDataset):
         )
 
     def filter_indices_by_size(self, indices, max_sizes):
-        """ Filter a list of sample indices. Remove those that are longer
-            than specified in max_sizes.
+        """ Functionally disabled. Was used to filter a list of sample indices, removing those that are longer than specified in max_sizes.
+            Since long sequences are truncated by Huggingface Tokenizer, we disable its function here.
 
         Args:
             indices (np.array): original array of sample indices
@@ -326,9 +330,5 @@ class KeyphrasePairDataset(FairseqDataset):
             np.array: filtered sample array
             list: list of removed indices
         """
-        return data_utils.filter_paired_dataset_indices_by_size(
-            self.src_sizes,
-            self.tgt_sizes,
-            indices,
-            max_sizes,
-        )
+        return indices, []
+
