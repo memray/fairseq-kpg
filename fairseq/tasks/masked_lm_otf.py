@@ -30,6 +30,7 @@ from fairseq.tasks import LegacyFairseqTask, register_task
 logger = logging.getLogger(__name__)
 
 
+
 @register_task("mlm_otf")
 class MlmOtfTask(LegacyFairseqTask):
     """Task for training masked language models (e.g., BERT, RoBERTa)."""
@@ -44,6 +45,8 @@ class MlmOtfTask(LegacyFairseqTask):
         )
         parser.add_argument("--valid-data", type=str,
                             help='directory of valid data.')
+        parser.add_argument("--no-bos-eos", action="store_true",
+                            help='disable adding bos/eos to the input sequence.')
         parser.add_argument("--max-shards-per-epoch", type=int, default=20,
                             help='how many shards to be loaded in the memory.')
         parser.add_argument("--dict-path", type=str,
@@ -82,6 +85,7 @@ class MlmOtfTask(LegacyFairseqTask):
     def __init__(self, args):
         super().__init__(args)
         self.text_field = args.text_field
+        self.no_bos_eos = args.no_bos_eos
         self.seed = args.seed
 
         self.tokens_per_sample = args.tokens_per_sample
@@ -170,7 +174,8 @@ class MlmOtfTask(LegacyFairseqTask):
             mask_prob=self.mask_prob,
             leave_unmasked_prob=self.leave_unmasked_prob,
             random_token_prob=self.random_token_prob,
-            split=split
+            split=split,
+            no_bos_eos=self.no_bos_eos
         )
 
 

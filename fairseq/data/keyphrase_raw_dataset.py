@@ -71,10 +71,7 @@ class KeyphraseRawDataset(FairseqDataset):
         pass
 
     def __len__(self):
-        if not self._size:
-            self._size = len(self.all_examples)
-
-        return self._size
+        return len(self.all_examples)
 
     def num_tokens(self, index):
         return self.sizes[index]

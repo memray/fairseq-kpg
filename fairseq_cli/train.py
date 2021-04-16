@@ -235,6 +235,8 @@ def train(
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
         ):
+            # print('step', i, '\t len(sample)=', len(samples), '\t #dp=', sum([len(s['id']) for s in samples]))
+            # for s in samples: print(s['id'].numpy())
             log_output = trainer.train_step(samples)
 
         if log_output is not None:  # not OOM, overflow, ...

@@ -19,12 +19,9 @@ class KeyphrasePairDataset(FairseqDataset):
     A pair of torch.utils.data.Datasets.
 
     Args:
-        src (torch.utils.data.Dataset): source dataset to wrap
-        src_sizes (List[int]): source sentence lengths
-        src_dict (~fairseq.data.Dictionary): source vocabulary
-        tgt (torch.utils.data.Dataset, optional): target dataset to wrap
-        tgt_sizes (List[int], optional): target sentence lengths
-        tgt_dict (~fairseq.data.Dictionary, optional): target vocabulary
+        dataset (torch.utils.data.Dataset): source dataset to wrap
+        sizes (List[int]): source sentence lengths
+        vocab (~fairseq.data.Dictionary): source vocabulary
         left_pad_source (bool, optional): pad source tensors on the left side
             (default: True).
         left_pad_target (bool, optional): pad target tensors on the left side
@@ -48,85 +45,43 @@ class KeyphrasePairDataset(FairseqDataset):
     """
 
     def __init__(
-        self, src, src_dict, src_sizes,
-        text_tokenizer, parse_fn,
-        tgt=None, tgt_dict=None, tgt_sizes=None,
-        shuffle=True, input_feeding=True,
+        self, dataset, vocab, sizes,
+        text_tokenizer, transform_fns,
+        input_feeding=True,
         left_pad_source=False, left_pad_target=False,
         max_source_length=None, max_target_length=None,
-        num_buckets=0,
-        pad_to_multiple=1,
+        shuffle=True, sort_by_length=True,
+        pad_to_multiple=1
     ):
-        if tgt_dict is not None:
-            assert src_dict.pad() == tgt_dict.pad()
-            assert src_dict.eos() == tgt_dict.eos()
-            assert src_dict.unk() == tgt_dict.unk()
-        if tgt is not None:
-            assert len(src) == len(tgt), "Source and target must contain the same number of examples"
         self.text_tokenizer = text_tokenizer
-        self.parse_fn = parse_fn
-        self.src = src
-        self.tgt = tgt
-        self.src_sizes = np.array(src_sizes)
-        self.tgt_sizes = np.array(tgt_sizes) if tgt_sizes is not None else None
-        self.sizes = np.vstack((self.src_sizes, self.tgt_sizes)).T if self.tgt_sizes is not None else self.src_sizes
-        self.src_dict = src_dict
-        self.tgt_dict = tgt_dict
+        self.transform_fns = transform_fns
+        self.dataset = dataset
+        self.sizes = np.array(sizes)
+        self.vocab = vocab
         self.left_pad_source = left_pad_source
         self.left_pad_target = left_pad_target
-        self.shuffle = shuffle
         self.input_feeding = input_feeding
         self.max_source_length = max_source_length
         self.max_target_length = max_target_length
-        if num_buckets > 0:
-            from fairseq.data import BucketPadLengthDataset
-            self.src = BucketPadLengthDataset(
-                self.src,
-                sizes=self.src_sizes,
-                num_buckets=num_buckets,
-                pad_idx=self.src_dict.pad(),
-                left_pad=self.left_pad_source,
-            )
-            self.src_sizes = self.src.sizes
-            logger.info('bucketing source lengths: {}'.format(list(self.src.buckets)))
-            if self.tgt is not None:
-                self.tgt = BucketPadLengthDataset(
-                    self.tgt,
-                    sizes=self.tgt_sizes,
-                    num_buckets=num_buckets,
-                    pad_idx=self.tgt_dict.pad(),
-                    left_pad=self.left_pad_target,
-                )
-                self.tgt_sizes = self.tgt.sizes
-                logger.info('bucketing target lengths: {}'.format(list(self.tgt.buckets)))
-
-            # determine bucket sizes using self.num_tokens, which will return
-            # the padded lengths (thanks to BucketPadLengthDataset)
-            num_tokens = np.vectorize(self.num_tokens, otypes=[np.long])
-            self.bucketed_num_tokens = num_tokens(np.arange(len(self.src)))
-            self.buckets = [
-                (None, num_tokens)
-                for num_tokens in np.unique(self.bucketed_num_tokens)
-            ]
-        else:
-            self.buckets = None
+        self.buckets = None
+        self.shuffle = shuffle
+        self.sort_by_length = sort_by_length
         self.pad_to_multiple = pad_to_multiple
 
     def get_batch_shapes(self):
         return self.buckets
 
     def __getitem__(self, index):
-        src_str, tgt_str = self.parse_fn(self.src[index])
+        example = self.dataset[index]
+        example['id'] = index
 
-        example = {
-            'id': index,
-            'source': src_str,
-            'target': tgt_str,
-        }
+        for transform_fn in self.transform_fns:
+            example = transform_fn(example)
+
         return example
 
     def __len__(self):
-        return len(self.src)
+        return len(self.dataset)
 
     def collate(
             self,
@@ -137,8 +92,18 @@ class KeyphrasePairDataset(FairseqDataset):
             pad_to_length=None,
             pad_to_multiple=1,
     ):
+        num_sample = len(samples)
+        samples = [s for s in samples if len(s['source'].strip()) > 0 and len(s['target'].strip()) > 0] # filter empty-target examples
+        # print('#sample: pre-filter=%d, after-filter=%d, diff=%d' % (num_sample, len(samples), num_sample-len(samples)))
+
         if len(samples) == 0:
             return {}
+        # print('=*' * 50)
+        # for s in samples:
+        #     print('id', s['id'])
+        #     print('source', len(s['source']), s['source'])
+        #     print('target', len(s['target']), s['target'])
+        #     print('=' * 50)
 
         def merge(key, left_pad, move_eos_to_beginning=False, pad_to_length=None):
             return data_utils.collate_tokens(
@@ -153,14 +118,18 @@ class KeyphrasePairDataset(FairseqDataset):
         # We need to manually add bos/eos due to the annoying implementation (https://github.com/huggingface/transformers/issues/7199):
         #    "Please note that the RoBERTa tokenizer is built using only
         #    <s> (the BOS token) and </s> (the SEP token), with two </s></s> as the separator."
-        if self.max_source_length is None:
-            src_tokens = self.text_tokenizer([s['source'] for s in samples],
-                                             add_special_tokens=False) # add <bos> and <eos> later
-        else:
-            src_tokens = self.text_tokenizer([s['source'] for s in samples],
-                                             add_special_tokens=False,
-                                             truncation=True,
-                                             max_length=self.max_source_length - 2) # account for <bos> and <eos>
+        try:
+            if self.max_source_length is None:
+                src_tokens = self.text_tokenizer([s['source'] for s in samples],
+                                                 add_special_tokens=False) # add <bos> and <eos> later
+            else:
+                src_tokens = self.text_tokenizer([s['source'] for s in samples],
+                                                 add_special_tokens=False,
+                                                 truncation=True,
+                                                 max_length=self.max_source_length - 2) # account for <bos> and <eos>
+        except Exception:
+            # occasionally
+            return {}
 
         src_lengths = []
 
@@ -181,14 +150,18 @@ class KeyphrasePairDataset(FairseqDataset):
         prev_output_tokens = None
         target = None
         if samples[0].get('target', None) is not None:
-            if self.max_target_length is None:
-                tgt_tokens = self.text_tokenizer([s['target'] for s in samples],
-                                                 add_special_tokens=False)
-            else:
-                tgt_tokens = self.text_tokenizer([s['target'] for s in samples],
-                                                 add_special_tokens=False,
-                                                 truncation=True,
-                                                 max_length=self.max_target_length - 2)
+            try:
+                if self.max_target_length is None:
+                    tgt_tokens = self.text_tokenizer([s['target'] for s in samples],
+                                                     add_special_tokens=False)
+                else:
+                    tgt_tokens = self.text_tokenizer([s['target'] for s in samples],
+                                                     add_special_tokens=False,
+                                                     truncation=True,
+                                                     max_length=self.max_target_length - 2)
+            except Exception:
+                return {}
+
             tgt_lengths = []
             for s, tgt_token in zip(samples, tgt_tokens['input_ids']):
                 tgt_token = [self.text_tokenizer.bos_token_id] + tgt_token + [self.text_tokenizer.eos_token_id]
@@ -215,6 +188,8 @@ class KeyphrasePairDataset(FairseqDataset):
                 )
         else:
             ntokens = src_lengths.sum().item()
+
+        # print(src_lengths.numpy().mean(), tgt_lengths.numpy().mean())
 
         batch = {
             'id': id,
@@ -266,8 +241,8 @@ class KeyphrasePairDataset(FairseqDataset):
         """
         res = self.collate(
             samples,
-            pad_idx=self.src_dict.pad(),
-            eos_idx=self.src_dict.eos(),
+            pad_idx=self.vocab.pad(),
+            eos_idx=self.vocab.eos(),
             input_feeding=self.input_feeding,
             pad_to_length=pad_to_length,
             pad_to_multiple=self.pad_to_multiple,
@@ -281,13 +256,12 @@ class KeyphrasePairDataset(FairseqDataset):
 
         Since sequences are truncated by Huggingface Tokenizer, we cap the length by max_source_length/max_target_length.
         """
-        return max(min(self.src_sizes[index], self.max_source_length),
-                   min(self.tgt_sizes[index], self.max_target_length) if self.tgt_sizes is not None else 0)
+        return min(self.sizes[index], self.max_source_length)
 
     def size(self, index):
         """Return an example's size as a float or tuple. This value is used when
         filtering a dataset with ``--max-positions``."""
-        return (self.src_sizes[index], self.tgt_sizes[index] if self.tgt_sizes is not None else 0)
+        return self.sizes[index]
 
     def ordered_indices(self):
         """Return an ordered list of indices. Batches will be constructed based
@@ -296,19 +270,16 @@ class KeyphrasePairDataset(FairseqDataset):
             indices = np.random.permutation(len(self)).astype(np.int64)
         else:
             indices = np.arange(len(self), dtype=np.int64)
-        if self.buckets is None:
+        if self.sort_by_length:
             # sort by target length, then source length
-            if self.tgt_sizes is not None:
-                indices = indices[
-                    np.argsort(self.tgt_sizes[indices], kind='mergesort')
-                ]
-            return indices[np.argsort(self.src_sizes[indices], kind='mergesort')]
-        else:
+            return indices[np.argsort(self.sizes[indices], kind='mergesort')]
+        if self.buckets is not None:
             # sort by bucketed_num_tokens, which is:
             #   max(padded_src_len, padded_tgt_len)
             return indices[
                 np.argsort(self.bucketed_num_tokens[indices], kind='mergesort')
             ]
+        return indices
 
     @property
     def supports_prefetch(self):
@@ -331,4 +302,3 @@ class KeyphrasePairDataset(FairseqDataset):
             list: list of removed indices
         """
         return indices, []
-

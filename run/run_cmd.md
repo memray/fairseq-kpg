@@ -39,7 +39,7 @@ train.py ~/efs/rum20/data/wiki/processed/json_phrase/train/ --valid-data ~/efs/r
 
 
 
-## A100
+## GCP A100
 export TOKENIZERS_PARALLELISM=false
 export WANDB_NAME=bart_kpgen_pretrain
 export WANDB_KEY=c338136c195ab221b8c7cfaa446db16b2e86c6db
@@ -62,3 +62,17 @@ $DATA_DIR --valid-data $VALID_DATA_DIR --validate-interval 5000 --save-dir $SAVE
 --ddp-backend=no_c10d --criterion label_smoothed_cross_entropy --share-all-embeddings --layernorm-embedding --share-all-embeddings --share-decoder-input-output-embed
 --reset-optimizer --reset-dataloader --reset-meters --required-batch-size-multiple 1 --optimizer adam --adam-betas '(0.9,0.999)' --adam-eps 1e-08 --lr $PEAK_LR
 --update-freq $UPDATE_FREQ --lr-scheduler polynomial_decay --label-smoothing 0.1 --dropout $DROPOUT --attention-dropout 0.1 --weight-decay 0.01 --log-format simple --log-interval 100 --seed 7 --fixed-validation-seed 7 --max-tokens $MAX_TOKEN --save-interval-updates $SAVE_INTERVAL --warmup-updates $WARMUP_UPDATES --total-num-update $TOTAL_UPDATES --num-workers $NUM_WORKER --find-unused-parameters --fp16 --ddp-backend=no_c10d --wandb-project transfer_kp_wiki
+
+## AWS V100*4
+mkdir ~/efs
+sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport fs-68c8399d.efs.us-east-1.amazonaws.com:/ efs
+
+	conda config --set env_prompt '({name})'
+	conda activate ~/efs/.conda/kp
+
+
+cd /home/ubuntu/efs/rum20/fairseq-kpg
+nohup bash run/kp/wikida-kptimes_4gpu.sh > /home/ubuntu/efs/rum20/exps/bart_kppretrain_wiki_1e5_controlled-DA_kptimes-NP_TL/train.log 2>&1 &
+
+nohup bash run/kp/wikida-kp20k_4gpu.sh > /home/ubuntu/efs/rum20/exps/bart_kppretrain_wiki_1e5_controlled-DA_kp20k-NP_TL/train.log 2>&1 &
+(OOM) nohup bash run/kp/wikida-openkp_4gpu.sh > /home/ubuntu/efs/rum20/exps/bart_kppretrain_wiki_1e5_controlled-DA_openkp-NP_TL/train.log 2>&1 &

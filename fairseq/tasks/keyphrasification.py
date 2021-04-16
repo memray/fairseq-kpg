@@ -4,108 +4,21 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import json
 import logging
 import os
 from functools import partial
 
-import numpy as np
-
-from fairseq import metrics, utils
-from fairseq.data import (
-    ConcatDataset,
-)
+from fairseq import utils
 from fairseq.data.encoders.hf_bpe import HuggingFacePretrainedBPE
 from fairseq.data.keyphrase_pair_dataset import KeyphrasePairDataset
 from fairseq.data.keyphrase_raw_dataset import KeyphraseRawDataset
 
 from . import register_task
 from fairseq.tasks import LegacyFairseqTask
-from fairseq.tasks.keyphrasification_utils import KP_DATASET_FIELDS, KP_CONCAT_TYPES, kpdict_parse_fn
+from fairseq.tasks.keyphrasification_utils import KP_DATASET_FIELDS, KP_CONCAT_TYPES, parse_kpdict, maybe_replace_target
 
 logger = logging.getLogger(__name__)
-
-
-def load_kppair_dataset(
-    data_path, split,
-    text_tokenizer, dictionary,
-    kp_concat_type,
-    combine, upsample_primary,
-    left_pad_source, left_pad_target,
-    max_source_length, max_target_length,
-    max_target_phrases,
-    num_buckets=0,
-    shuffle=True,
-    pad_to_multiple=1,
-    lowercase=False,
-    seed=0,
-    epoch=0,
-    dataset_type=None
-):
-    src_datasets = []
-    tgt_datasets = []
-
-    for k in itertools.count():
-        split_k = split + ('-'+str(k) if split == 'train' else '')
-        filepath = os.path.join(os.path.realpath(data_path), '{}.json'.format(split_k))
-
-        # for cases that train set is not split into pieces
-        if not os.path.exists(filepath):
-            filepath = os.path.join(os.path.realpath(data_path), '{}.json'.format(split))
-            combine = False
-
-        if not os.path.exists(filepath):
-            if k > 0:
-                break
-            else:
-                raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
-
-        src_dataset = KeyphraseRawDataset(filepath, dataset_type)
-        src_datasets.append(src_dataset)
-
-        logger.info('{} {} {} examples'.format(
-            data_path, split_k, len(src_dataset)
-        ))
-
-        if not combine:
-            break
-
-    assert len(src_datasets) == len(tgt_datasets) or len(tgt_datasets) == 0
-
-    if len(src_datasets) == 1:
-        src_dataset = src_datasets[0]
-        # tgt_dataset = tgt_datasets[0] if len(tgt_datasets) > 0 else None
-    else:
-        sample_ratios = [1] * len(src_datasets)
-        sample_ratios[0] = upsample_primary
-        src_dataset = ConcatDataset(src_datasets, sample_ratios)
-        # if len(tgt_datasets) > 0:
-        #     tgt_dataset = ConcatDataset(tgt_datasets, sample_ratios)
-        # else:
-        #     tgt_dataset = None
-
-    # if prepend_bos:
-    #     assert hasattr(dictionary, "bos_index") and hasattr(dictionary, "bos_index")
-    #     src_dataset = PrependTokenDataset(src_dataset, dictionary.bos())
-    #     if tgt_dataset is not None:
-    #         tgt_dataset = PrependTokenDataset(tgt_dataset, dictionary.bos())
-
-    if not dataset_type:
-        dataset_type = src_dataset.dataset_type
-    parse_fn = partial(kpdict_parse_fn, tokenizer=text_tokenizer,
-                       kp_concat_type=kp_concat_type, dataset_type=dataset_type,
-                       max_target_phrases=max_target_phrases, lowercase=lowercase,
-                       seed=seed + epoch if shuffle else 0)
-    return KeyphrasePairDataset(
-        src_dataset, src_dict=dictionary, src_sizes=src_dataset.sizes,
-        text_tokenizer=text_tokenizer, parse_fn=parse_fn,
-        shuffle=shuffle,
-        left_pad_source=left_pad_source,
-        left_pad_target=left_pad_target,
-        max_source_length=max_source_length,
-        max_target_length=max_target_length,
-        num_buckets=num_buckets,
-        pad_to_multiple=pad_to_multiple,
-    )
 
 
 @register_task('keyphrasification')
@@ -140,11 +53,19 @@ class KeyphrasificationTask(LegacyFairseqTask):
                             avoid the need for repeating them in all directories')
         parser.add_argument("--valid-data", type=str,
                             help='directory of valid data.')
+        parser.add_argument('--label-data', type=str, help='colon separated path to file list, \
+                            all files should have the same number of lines as `data`. \
+                            If given, target labels will be sampled from those labels.')
+        parser.add_argument('--label-sample-ratio', type=str, help='Sampling proportion of labels from each label file.')
         parser.add_argument("--dict-path", type=str,
                             help='path to vocab.bpe.')
-        parser.add_argument("--kp-concat-type", default='nosort',
-                            choices=KP_CONCAT_TYPES,
+        parser.add_argument('--add-control-prefix-prob', type=float, default=0.0,
+                            help='Roll to decide whether adding a prefix to indicate number of phrases to predict.'
+                                 '1.0 always add prefix, 0.0 always not add prefix.')
+        parser.add_argument("--kp-concat-type", choices=KP_CONCAT_TYPES, required=True,
                             help='how to present target sequence')
+        parser.add_argument("--dataset-type", choices=list(KP_DATASET_FIELDS.keys()), required=True,
+                            help='Specify type of dataset, select from ' + str(list(KP_DATASET_FIELDS.keys())))
         parser.add_argument("--num-encoder-workers", type=int, default=20)
         parser.add_argument('--left-pad-source', default='False', type=str, metavar='BOOL',
                             help='pad the source on the left')
@@ -186,9 +107,6 @@ class KeyphrasificationTask(LegacyFairseqTask):
         if args.bpe == 'hf_pretrained_bpe':
             text_tokenizer = HuggingFacePretrainedBPE.load(args)
             logger.info('Loaded dictionary from Huggingface {}'.format(args.bpe_vocab))
-        # elif args.bpe == 'gpt2':
-        #     text_tokenizer = get_encoder(args.encoder_json, args.vocab_bpe)
-        #     logger.info('Loaded dictionary from fairseq GPT2')
         else:
             raise NotImplementedError('Unsupported tokenizer %s' % args.tokenizer)
 
@@ -234,30 +152,68 @@ class KeyphrasificationTask(LegacyFairseqTask):
             split (str): name of the split (e.g., train, valid, test)
         """
         paths = utils.split_paths(self.args.data)
-        assert len(paths) > 0
-        if split != getattr(self.args, "train_subset", None):
-            # if not training data set, use the first shard for valid and test
-            paths = paths[:1]
-        data_path = paths[(epoch - 1) % len(paths)]
+        assert len(paths) == 1, 'Currently only one dataset is supported for keyphrase task.'
+        data_path = paths[0]
+        if not os.path.exists(data_path):
+            raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
+        dataset = KeyphraseRawDataset(data_path, self.args.dataset_type)
+        logger.info('{} {} {} examples'.format(
+            data_path, split, len(dataset)
+        ))
 
-        self.datasets[split] = load_kppair_dataset(
-            data_path, split,
-            self.text_tokenizer, self.dictionary,
-            self.kp_concat_type,
-            combine=combine,
-            upsample_primary=self.args.upsample_primary,
+        if self.args.label_data:
+            self.args.label_sample_ratio = eval(self.args.label_sample_ratio)
+            assert sum(self.args.label_sample_ratio) == 1.0
+            label_paths = utils.split_paths(self.args.label_data)
+            for labelset_id, labelset_path in enumerate(label_paths):
+                label_exs = [json.loads(l) for l in open(labelset_path, 'r')]
+                assert len(label_exs) == len(dataset), \
+                    'Size of additional label data (#=%d) must match the size of dataset (#=%d).' % (len(label_exs), len(dataset))
+                # model's outputs may tokenized, concatenate them to strings
+                if not isinstance(label_exs[0]['pred_sents'][0], str):
+                    for label_ex in label_exs:
+                        label_ex['pred_sents'] = [' '.join(p) for p in label_ex['pred_sents']]
+                [data_ex.update({'target%d' % labelset_id: label_ex['pred_sents']})
+                 for data_ex, label_ex in zip(dataset.example_dicts, label_exs)]
+                del label_exs
+        else:
+            self.args.label_sample_ratio = None
+
+        # dataset.example_dicts = dataset.example_dicts[2800:]
+
+        # configure transform functions
+        kp_parse_fn = partial(parse_kpdict,
+                              kp_concat_type=self.args.kp_concat_type, dataset_type=self.args.dataset_type,
+                              sep_token=self.text_tokenizer.sep_token,
+                              max_target_phrases=self.args.max_target_phrases,
+                              max_phrase_len=self.args.max_phrase_len,
+                              lowercase=self.args.lowercase,
+                              seed=self.args.seed + epoch if split != 'test' else 0)
+
+        target_replace_fn = partial(maybe_replace_target,
+                                    label_sample_ratio=self.args.label_sample_ratio,
+                                    max_target_phrases=self.args.max_target_phrases,
+                                    max_phrase_len=self.args.max_phrase_len,
+                                    add_control_prefix_prob=self.args.add_control_prefix_prob,
+                                    fix_target_number=False, allow_duplicate=False,
+                                    sep_token=self.text_tokenizer.sep_token,
+                                    seed=self.args.seed + epoch if split != 'test' else 0
+                                    )
+
+        transform_fns = [kp_parse_fn, target_replace_fn]
+
+        self.datasets[split] = KeyphrasePairDataset(
+            dataset, vocab=self.dictionary, sizes=dataset.sizes,
+            text_tokenizer=self.text_tokenizer, transform_fns=transform_fns,
             left_pad_source=self.args.left_pad_source,
             left_pad_target=self.args.left_pad_target,
             max_source_length=self.args.max_source_length,
             max_target_length=self.args.max_target_length,
-            max_target_phrases=self.args.max_target_phrases,
-            num_buckets=self.args.num_batch_buckets,
+            # shuffle=False,
             shuffle=(split != 'test'),
-            pad_to_multiple=self.args.required_seq_len_multiple,
-            lowercase=self.args.lowercase,
-            seed=self.args.seed,
-            epoch=epoch
+            sort_by_length=True
         )
+
 
     def build_dataset_for_inference(self, src_tokens, src_lengths, constraints=None):
         return KeyphrasePairDataset(src_tokens, src_lengths, self.source_dictionary,

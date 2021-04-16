@@ -79,7 +79,8 @@ class MlmOtfDataset(FairseqDataset):
         mask_prob: float = 0.15,
         leave_unmasked_prob: float = 0.1,
         random_token_prob: float = 0.1,
-        split: str = 'valid'
+        split: str = 'valid',
+        no_bos_eos: bool = False
     ):
         assert 0.0 < mask_prob < 1.0
         assert 0.0 <= random_token_prob <= 1.0
@@ -103,6 +104,7 @@ class MlmOtfDataset(FairseqDataset):
 
         self.buckets = None
         self.split = split
+        self.no_bos_eos = no_bos_eos
 
     def get_batch_shapes(self):
         return self.buckets
@@ -165,6 +167,7 @@ class MlmOtfDataset(FairseqDataset):
                 # target side, unmasked positions are [pad]
                 tgt_ids = np.full(num_token, self.text_tokenizer.pad_token_id).tolist()
                 src_ids = tokened_sample.ids
+                src_ids_nomask = tokened_sample.ids
 
                 # sample word masks
                 num_masked_word = int(self.mask_prob * num_word + np.random.rand())
@@ -191,9 +194,12 @@ class MlmOtfDataset(FairseqDataset):
                         # replace with [mask]
                         src_ids[b: e] = [self.text_tokenizer.mask_token_id] * (e - b)
 
-                src_ids = [self.text_tokenizer.bos_token_id] + src_ids + [self.text_tokenizer.eos_token_id]
-                tgt_ids = [self.text_tokenizer.pad_token_id] + tgt_ids + [self.text_tokenizer.pad_token_id]
+                if not self.no_bos_eos:
+                    src_ids = [self.text_tokenizer.bos_token_id] + src_ids + [self.text_tokenizer.eos_token_id]
+                    tgt_ids = [self.text_tokenizer.pad_token_id] + tgt_ids + [self.text_tokenizer.pad_token_id]
+
                 sample['source'] = torch.LongTensor(src_ids)
+                sample['source_nomask'] = torch.LongTensor(src_ids_nomask)
                 sample['target'] = torch.LongTensor(tgt_ids)
                 assert sample['source'].shape == sample['target'].shape, 'size of source/target must match!'
                 lengths.append(len(src_ids))
@@ -206,6 +212,8 @@ class MlmOtfDataset(FairseqDataset):
                 'source', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
             tgt_ids = merge(  # [BS x max_len]
                 'target', left_pad=False, pad_to_length=pad_to_length['target'] if pad_to_length is not None else None)
+            src_ids_nomask = merge(  # [BS x max_len]
+                'source_nomask', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
 
 
         # sort by descending source length
@@ -213,6 +221,8 @@ class MlmOtfDataset(FairseqDataset):
         lengths, sort_order = lengths.sort(descending=True)
         id = id.index_select(0, sort_order)
         src_ids = src_ids.index_select(0, sort_order)
+        tgt_ids = tgt_ids.index_select(0, sort_order)
+        src_ids_nomask = src_ids_nomask.index_select(0, sort_order)
 
         prev_output_tokens = None
         ntokens = lengths.sum().item()
@@ -224,6 +234,7 @@ class MlmOtfDataset(FairseqDataset):
             'net_input': {
                 'src_tokens': src_ids,
                 'src_lengths': lengths,
+                'src_tokens_nomask': src_ids_nomask,
             },
             'target': tgt_ids,
         }
@@ -231,6 +242,7 @@ class MlmOtfDataset(FairseqDataset):
             batch['net_input']['prev_output_tokens'] = prev_output_tokens.index_select(0, sort_order)
 
         return batch
+
 
     def collater(self, samples, pad_to_length=None):
         """Merge a list of samples to form a mini-batch.

@@ -4,8 +4,12 @@
 # LICENSE file in the root directory of this source tree.
 import random
 import re
+import string
 
 import numpy as np
+
+import spacy
+spacy_nlp = spacy.load('en_core_web_sm')
 
 from fairseq.data import data_utils
 
@@ -28,34 +32,104 @@ def parse_src_fn(ex_dict, title_field, text_field):
     return concat_str
 
 
-def kpdict_parse_fn(ex_dict, tokenizer, kp_concat_type, dataset_type='scipaper', max_target_phrases=-1, lowercase=False):
+def maybe_replace_target(example, label_sample_ratio,
+                         max_target_phrases, max_phrase_len=-1,
+                         add_control_prefix_prob=0.0,
+                         fix_target_number=False, allow_duplicate=False,
+                         sep_token='<sep>', seed=0):
+    '''
+    If additional target label sets are given, we replace example['target'] with new labels
+    :param example:
+    :param label_sample_ratio: sampling ratio of each extra label set
+    :param max_target_phrases:
+    :param add_control_prefix_prob: if given, we append the number of phrases as a prefix to source string
+    :param fix_target_number: if True, target always contains `max_target_phrases` phrases, otherwise it's sampled in (0, max_target_phrases]
+    :param allow_duplicate: if True, target can contain duplicate phrases, otherwise duplicate phrases are removed
+    :param seed:
+    :return:
+    '''
+    if not label_sample_ratio: # label set is not given, directly return
+        return example
+
+    with data_utils.numpy_seed(seed):
+        tgts = []
+        for labelset_id, ratio in enumerate(label_sample_ratio):
+            # remove punctuations
+            candicate_labels = [p.strip(string.punctuation) for p in example['target%d' % labelset_id]]
+            if max_phrase_len > 0:
+                candicate_labels = [p for p in candicate_labels if len(p.split()) <= max_phrase_len]
+            num_to_sample = min(len(candicate_labels), int(ratio * max_target_phrases))
+            tgts.extend(np.random.choice(candicate_labels, num_to_sample, replace=False))
+
+        # deduplicate
+        if not allow_duplicate:
+            tgts = list(set(tgts))
+
+        # shuffle order and randomize target size
+        np.random.shuffle(tgts)
+        if not fix_target_number:
+            tgts = np.random.choice(tgts, size=np.random.randint(len(tgts)) + 1, replace=False).tolist()
+
+        tgt_str = sep_token.join(tgts)
+        example['target'] = tgt_str
+
+        # add control prefix (number of phrases to output)
+        if add_control_prefix_prob > 0.0 and np.random.rand() < add_control_prefix_prob:
+            prefix_str = '<mixed><number>%d<s>' % (len(tgts))
+            example['source'] = prefix_str + example['source']
+
+    return example
+
+
+def parse_kpdict(example, kp_concat_type, dataset_type='scipaper', sep_token='<sep>',
+                 max_target_phrases=-1, max_phrase_len=-1, lowercase=False, seed=0,
+                 add_control_prefix_prob=0.0):
     assert dataset_type in KP_DATASET_FIELDS
     title_field, text_field, keyword_field, category_field = KP_DATASET_FIELDS[dataset_type]
 
-    src_str = parse_src_fn(ex_dict, title_field, text_field)
-    if isinstance(ex_dict[keyword_field], str):
-        tgt_kps = ex_dict[keyword_field].split(';')
-    else:
-        tgt_kps = ex_dict[keyword_field]
-    if kp_concat_type == 'one2one':
+    src_str = parse_src_fn(example, title_field, text_field)
+    # Ensure target is a list of phrases. Each phrase is a string, not a list of tokens
+    if isinstance(example[keyword_field], str):
+        example[keyword_field] = example[keyword_field].split(';')
+    if isinstance(example[keyword_field][0], list):
+        example[keyword_field] = [' '.join(p) for p in example[keyword_field]]
+    tgt_kps = example[keyword_field]
+
+    if max_phrase_len > 0:
+        tgt_kps = [p for p in tgt_kps if len(p.split()) <= max_phrase_len]
+
+    prefix_str = None
+    if len(tgt_kps) == 0:
+        tgt_str = ''
+    elif kp_concat_type == 'one2one':
         # sample one tgt from multiple tgts and use it as the only tgt
         rand_idx = np.random.randint(len(tgt_kps))
         tgt_str = tgt_kps[rand_idx]
     elif kp_concat_type in KP_CONCAT_TYPES:
         # generate one2seq training data points
-        order = obtain_sorted_indices(src_str.lower().split(),
-                                      [kp.lower().split() for kp in tgt_kps],
-                                      sort_by=kp_concat_type)
+        src_seq = [t.text.lower() for t in spacy_nlp(src_str, disable=["textcat"])]
+        tgt_seqs = [[t.text.lower() for t in spacy_nlp(p, disable=["textcat"])] for p in tgt_kps]
+        order, prefix_str = obtain_sorted_indices(src_seq, tgt_seqs, sort_by=kp_concat_type, seed=seed)
+
         if max_target_phrases > 0 and len(order) > max_target_phrases:
             order = order[: max_target_phrases]
         tgt = [tgt_kps[idx] for idx in order]
-        tgt_str = tokenizer.sep_token.join(tgt)
+        tgt_str = sep_token.join(tgt)
     else:
         raise NotImplementedError('Unsupported target concatenation type ' + kp_concat_type)
 
     if lowercase:
-        return src_str.lower(), tgt_str.lower()
-    return src_str, tgt_str
+        src_str = src_str.lower()
+        tgt_str = tgt_str.lower()
+
+    example['source'] = src_str
+    example['target'] = tgt_str
+
+    # add control prefix (number of present/absent phrases to output)
+    if prefix_str and add_control_prefix_prob > 0.0 and np.random.rand() < add_control_prefix_prob:
+        example['source'] = prefix_str + src_str
+
+    return example
 
 
 def wiki_ex_parse_fn(ex_dict, sep_token,
@@ -100,7 +174,7 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
 
         # present phrases
         if max_target_phrases > 0 and len(pres_phrases) > max_target_phrases / 2:
-            pres_phrases = random.sample(pres_phrases, int(max_target_phrases / 2))
+            pres_phrases = np.random.choice(pres_phrases, int(max_target_phrases / 2), replace=False)
 
         num_pres = len(pres_phrases)
         num_header = len(header_phrases)
@@ -113,8 +187,8 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
             num_cat = min(len(category_phrases), random.randint(0, int(max_target_phrases / 2 - len(header_phrases))))
             num_seealso = min(len(seealso_phrases), int(max_target_phrases / 2) - len(header_phrases) - num_cat)
             abs_phrases = header_phrases \
-                          + random.sample(category_phrases, num_cat) \
-                          + random.sample(seealso_phrases, num_seealso)
+                          + np.random.choice(category_phrases, num_cat, replace=False)\
+                          + np.random.choice(seealso_phrases, num_seealso, replace=False)
 
         # mask random spans
         num_infill = 0
@@ -180,7 +254,7 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
         # mask random present phrases
         if phrase_corr_rate > 0.0 and len(pres_phrases) > 0:
             num_mask_kp = min(1, int(len(pres_phrases) * phrase_corr_rate))
-            mask_pres_phrases = random.sample(pres_phrases, num_mask_kp)
+            mask_pres_phrases = np.random.choice(pres_phrases, num_mask_kp, replace=False)
             for p in mask_pres_phrases:
                 src_text = re.sub(p, '<present>', src_text, flags=re.IGNORECASE)
 
@@ -195,7 +269,7 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
     return src_text, tgt_text
 
 
-def obtain_sorted_indices(src, tgt_seqs, sort_by):
+def obtain_sorted_indices(src, tgt_seqs, sort_by, seed):
     """
     :param src: used for verbatim and alphabetical
     :param tgt_seqs:
@@ -203,9 +277,11 @@ def obtain_sorted_indices(src, tgt_seqs, sort_by):
     :return:
     """
     num_tgt = len(tgt_seqs)
+    prefix_str = None
 
     if sort_by == 'random':
-        sorted_id = np.random.permutation(num_tgt)
+        with data_utils.numpy_seed(seed):
+            sorted_id = np.random.permutation(num_tgt)
     elif sort_by.startswith('nosort'):
         sorted_id = list(range(len(tgt_seqs)))
     elif sort_by.startswith('alphab'):
@@ -233,13 +309,16 @@ def obtain_sorted_indices(src, tgt_seqs, sort_by):
         else:
             raise NotImplementedError('Unsupported sort_by value: ' + sort_by)
             sorted_id = present_tgt_idx
+
+        # add control prefix (number of phrases to output)
+        prefix_str = '<present>%d<absent>%d<s>' % (len(present_tgt_idx), len(absent_tgt_idx))
     else:
         raise NotImplementedError('Unsupported sort_by value: ' + sort_by)
 
     if sort_by.endswith('reverse'):
         sorted_id = sorted_id[::-1]
 
-    return np.asarray(sorted_id, dtype=int)
+    return np.asarray(sorted_id, dtype=int), prefix_str
 
 
 def if_present_duplicate_phrases(src_seq, tgt_seqs):

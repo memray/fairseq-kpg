@@ -61,13 +61,12 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
 
     suffix = cfg.checkpoint_suffix or ""
     checkpoint_conds = collections.OrderedDict()
-    checkpoint_conds["checkpoint{}{}.pt".format(epoch, suffix)] = (
-        end_of_epoch and not cfg.no_epoch_checkpoints and epoch % cfg.save_interval == 0
-    )
     # @memray, use steps in name only
+    # checkpoint_conds["checkpoint{}{}.pt".format(epoch, suffix)] = (
+    #     end_of_epoch and not cfg.no_epoch_checkpoints and epoch % cfg.save_interval == 0
+    # )
     checkpoint_conds["checkpoint_step_{}.pt".format(updates)] = (
-        not end_of_epoch
-        and cfg.save_interval_updates > 0
+        cfg.save_interval_updates > 0
         and updates % cfg.save_interval_updates == 0
     )
     # checkpoint_conds["checkpoint_{}_{}{}.pt".format(epoch, updates, suffix)] = (
@@ -110,7 +109,7 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
             )
         )
 
-    if not end_of_epoch and cfg.keep_interval_updates > 0:
+    if cfg.keep_interval_updates > 0:
         # remove old checkpoints; checkpoints are sorted in descending order
         checkpoints = checkpoint_paths(
             cfg.save_dir, pattern=r"checkpoint_\d+_(\d+)\.pt"

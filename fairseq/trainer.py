@@ -669,6 +669,11 @@ class Trainer(object):
                 self._log_oom(e)
                 logger.error("OOM during optimization, irrecoverable")
             raise e
+        except ZeroDivisionError as e:
+            # @memray, occasionally the sample is empty, so add a condition check
+            logger.info("NOTE: ZeroDivision detected, " + str(e))
+            grad_norm = torch.tensor(0.0).cuda()
+            self.zero_grad()
 
         # Some distributed wrappers (e.g., SlowMo) need access to the optimizer after the step
         if hasattr(self.model, "perform_additional_optimizer_actions"):

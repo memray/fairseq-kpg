@@ -8,3 +8,4 @@ from .model import *  # noqa
 from .model_camembert import *  # noqa
 from .model_gottbert import *  # noqa
 from .model_xlmr import *  # noqa
+from .model_bottleneck import *  # noqa

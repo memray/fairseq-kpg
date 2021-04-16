@@ -43,7 +43,8 @@ class HuggingFacePretrainedBPE(object):
         sep_token = '<sep>'
         kp_special_tokens = ['<present>', '<absent>',
                              '<category>', '<infill>', '<seealso>', '<header>',
-                             '<|endoftext|>', '<sep>', '<mask>']
+                             '<|endoftext|>', '<sep>', '<mask>',
+                             '<mixed>', '<number>', '<phrase>']
 
         tokenizer = RobertaTokenizer(vocab_file=args.bpe_vocab,
                                      merges_file=args.bpe_merges,
