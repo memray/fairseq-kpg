@@ -50,8 +50,10 @@ class HuggingFacePretrainedBPE(object):
                                      merges_file=args.bpe_merges,
                                      sep=sep_token,  # doesn't matter
                                      additional_special_tokens=kp_special_tokens)
+
         sep_token_id = tokenizer.convert_tokens_to_ids(sep_token)
         added_sep_token = AddedToken(sep_token, lstrip=False, rstrip=False)
+
         tokenizer.sep_token = sep_token
         tokenizer._sep_token = added_sep_token
         tokenizer.init_kwargs['sep_token'] = sep_token
@@ -62,17 +64,18 @@ class HuggingFacePretrainedBPE(object):
         tokenizer.special_tokens_map_extended['sep_token'] = added_sep_token
 
         tokenizer.unique_no_split_tokens = tokenizer.all_special_tokens
-
         tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base",
-                                                         __slow_tokenizer=tokenizer, tokenizer_file=None,
+                                                         __slow_tokenizer=tokenizer,
+                                                         tokenizer_file=None,
                                                          vocab_file=args.bpe_vocab,
                                                          merges_file=args.bpe_merges)
         logger.info('Vocab size=%d, base vocab size=%d' % (len(tokenizer), tokenizer.vocab_size))
 
         # a workaround for bpe dropout (https://github.com/huggingface/tokenizers/issues/201)
         if float(args.bpe_dropout) > 0.0:
-            workaround_files = tokenizer._tokenizer.model.save(os.path.dirname(args.bpe_vocab), 'workaround')
-            tokenizer._tokenizer.model = type(tokenizer._tokenizer.model)(*workaround_files, dropout=float(args.bpe_dropout))
+            tokenizer._tokenizer.model.dropout = float(args.bpe_dropout)
+            # workaround_files = tokenizer._tokenizer.model.save(os.path.dirname(args.bpe_vocab), 'workaround')
+            # tokenizer._tokenizer.model = type(tokenizer._tokenizer.model)(*workaround_files, dropout=float(args.bpe_dropout))
 
         return tokenizer
 

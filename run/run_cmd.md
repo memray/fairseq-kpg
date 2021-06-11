@@ -1,3 +1,7 @@
+## Freezable
+cd /zfs1/hdaqing/rum20/kp/fairseq-kpg/
+source run/bottleneck/pretrain_attention.sh
+
 ## RoBERTa
 https://github.com/pytorch/fairseq/blob/master/examples/roberta/README.pretraining.md
 8x32GB V100 GPUs. Each GPU uses a batch size of 16 sequences ($MAX_SENTENCES) and accumulates gradients to further increase the batch size by 16x ($UPDATE_FREQ), for a total batch size of 2048 sequences.

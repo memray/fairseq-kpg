@@ -11,6 +11,58 @@ from fairseq import utils
 from fairseq.data import encoders
 
 
+class BottleneckBERTHubInterface(nn.Module):
+    """A simple PyTorch Hub interface to RoBERTa.
+
+    Usage: https://github.com/pytorch/fairseq/tree/master/examples/roberta
+    """
+
+    def __init__(self, cfg, task, model):
+        super().__init__()
+        self.cfg = cfg
+        self.task = task
+        self.model = model
+
+        # this is useful for determining the device
+        self.register_buffer("_float_tensor", torch.tensor([0], dtype=torch.float))
+
+    @property
+    def device(self):
+        return self._float_tensor.device
+
+    def encode(
+        self, sentence: str, *addl_sentences, no_separator=False
+    ) -> torch.LongTensor:
+        """
+        BPE-encode a sentence (or multiple sentences).
+
+        Every sequence begins with a beginning-of-sentence (`<s>`) symbol.
+        Every sentence ends with an end-of-sentence (`</s>`) and we use an
+        extra end-of-sentence (`</s>`) as a separator.
+
+        Example (single sentence): `<s> a b c </s>`
+        Example (sentence pair): `<s> d e f </s> </s> 1 2 3 </s>`
+
+        The BPE encoding follows GPT-2. One subtle detail is that the GPT-2 BPE
+        requires leading spaces. For example::
+
+            >>> roberta.encode('Hello world').tolist()
+            [0, 31414, 232, 2]
+            >>> roberta.encode(' world').tolist()
+            [0, 232, 2]
+            >>> roberta.encode('world').tolist()
+            [0, 8331, 2]
+        """
+        bpe_sentence = "<s> " + self.bpe.encode(sentence) + " </s>"
+        for s in addl_sentences:
+            bpe_sentence += " </s>" if not no_separator else ""
+            bpe_sentence += " " + self.bpe.encode(s) + " </s>"
+        tokens = self.task.source_dictionary.encode_line(
+            bpe_sentence, append_eos=False, add_if_not_exist=False
+        )
+        return tokens.long()
+
+
 class RobertaHubInterface(nn.Module):
     """A simple PyTorch Hub interface to RoBERTa.
 

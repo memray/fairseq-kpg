@@ -167,6 +167,7 @@ class KeyphrasePairDataset(FairseqDataset):
                 tgt_token = [self.text_tokenizer.bos_token_id] + tgt_token + [self.text_tokenizer.eos_token_id]
                 s['target'] = torch.LongTensor(tgt_token)
                 tgt_lengths.append(len(tgt_token))
+                # print(len(tgt_token))
             target = merge(
                 'target', left_pad=self.left_pad_target,
                 pad_to_length=pad_to_length['target'] if pad_to_length is not None else None,
@@ -256,7 +257,7 @@ class KeyphrasePairDataset(FairseqDataset):
 
         Since sequences are truncated by Huggingface Tokenizer, we cap the length by max_source_length/max_target_length.
         """
-        return min(self.sizes[index], self.max_source_length)
+        return min(int(self.sizes[index] * 1.2), self.max_source_length+self.max_target_length)
 
     def size(self, index):
         """Return an example's size as a float or tuple. This value is used when

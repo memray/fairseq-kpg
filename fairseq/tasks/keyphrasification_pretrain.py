@@ -154,7 +154,8 @@ def load_pretrain_dataset(
                        max_phrase_len=max_phrase_len,
                        max_target_phrases=max_target_phrases,
                        phrase_corr_rate=phrase_corr_rate,
-                       random_span_rate=random_span_rate, span_len_opts=span_lens, len_distrib=len_distrib,
+                       random_span_rate=random_span_rate,
+                       span_len_opts=span_lens, len_distrib=len_distrib,
                        lowercase=lowercase,
                        seed=seed + epoch if shuffle else 0)
 

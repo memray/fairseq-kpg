@@ -153,9 +153,18 @@ class KeyphrasificationTask(LegacyFairseqTask):
         """
         paths = utils.split_paths(self.args.data)
         assert len(paths) == 1, 'Currently only one dataset is supported for keyphrase task.'
-        data_path = paths[0]
-        if not os.path.exists(data_path):
-            raise FileNotFoundError('Dataset not found: {} ({})'.format(split, data_path))
+        root_path = paths[0]
+        if not os.path.exists(root_path):
+            raise FileNotFoundError('Dataset not found: {} ({})'.format(split, root_path))
+        if os.path.isdir(root_path):
+            data_names = sorted(os.listdir(root_path))
+            data_file_name = data_names[epoch % len(data_names)]
+            data_path = os.path.join(root_path, data_file_name)
+            is_folder = True
+        else:
+            data_path = root_path
+            is_folder = False
+
         dataset = KeyphraseRawDataset(data_path, self.args.dataset_type)
         logger.info('{} {} {} examples'.format(
             data_path, split, len(dataset)
@@ -166,6 +175,10 @@ class KeyphrasificationTask(LegacyFairseqTask):
             assert sum(self.args.label_sample_ratio) == 1.0
             label_paths = utils.split_paths(self.args.label_data)
             for labelset_id, labelset_path in enumerate(label_paths):
+                if is_folder:
+                    labelset_path = os.path.join(labelset_path, data_file_name)
+                    assert os.path.exists(labelset_path), 'labelset data does not exist, path: '+ labelset_path
+
                 label_exs = [json.loads(l) for l in open(labelset_path, 'r')]
                 assert len(label_exs) == len(dataset), \
                     'Size of additional label data (#=%d) must match the size of dataset (#=%d).' % (len(label_exs), len(dataset))
@@ -174,7 +187,7 @@ class KeyphrasificationTask(LegacyFairseqTask):
                     for label_ex in label_exs:
                         label_ex['pred_sents'] = [' '.join(p) for p in label_ex['pred_sents']]
                 [data_ex.update({'target%d' % labelset_id: label_ex['pred_sents']})
-                 for data_ex, label_ex in zip(dataset.example_dicts, label_exs)]
+                    for data_ex, label_ex in zip(dataset.example_dicts, label_exs)]
                 del label_exs
         else:
             self.args.label_sample_ratio = None

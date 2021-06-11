@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
+from typing import List
 
 import numpy as np
 import torch
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_word_spans(tokens, delimiter):
-    word_start_positions = [tid for tid, t in enumerate(tokens) if t.startswith(delimiter)]
+    word_start_positions: List[int] = [tid for tid, t in enumerate(tokens) if t.startswith(delimiter)]
 
     word_spans = []
 
@@ -24,11 +25,12 @@ def get_word_spans(tokens, delimiter):
         if i == 0: # first word
             if word_start_positions[0] > 0:
                 word_spans.append((0, word_start_positions[0]))
-            word_spans.append((word_start_positions[i], word_start_positions[i + 1]))
+            if len(word_start_positions) > 0: # 2nd word
+                word_spans.append((word_start_positions[i], word_start_positions[i + 1]))
         elif i == len(word_start_positions) - 1: # last word
             if word_start_positions[-1] <= len(tokens):
                 word_spans.append((word_start_positions[-1], len(tokens)))
-        else:
+        else: # all words in the middle
             word_spans.append((word_start_positions[i], word_start_positions[i + 1]))
 
     return word_spans
@@ -214,7 +216,6 @@ class MlmOtfDataset(FairseqDataset):
                 'target', left_pad=False, pad_to_length=pad_to_length['target'] if pad_to_length is not None else None)
             src_ids_nomask = merge(  # [BS x max_len]
                 'source_nomask', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
-
 
         # sort by descending source length
         lengths = torch.LongTensor(lengths)

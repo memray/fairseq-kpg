@@ -11,7 +11,6 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fairseq.models.roberta import RobertaEncoder
 
 from fairseq.checkpoint_utils import prune_state_dict
 
@@ -28,7 +27,7 @@ from fairseq.modules.quant_noise import quant_noise as apply_quant_noise_
 from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.modules.transformer_sentence_encoder_bottleneck import TransformerSentenceEncoderBottleneck
 
-from .hub_interface import RobertaHubInterface
+from .hub_interface import BottleneckBERTHubInterface
 
 logger = logging.getLogger(__name__)
 
@@ -242,13 +241,18 @@ class BottleneckBERTModel(FairseqEncoderDecoderModel):
         classification_head_name=None,
         **kwargs
     ):
-        src_tokens_nomask = kwargs['src_tokens_nomask']
-        src_encoding = self.encoder(src_tokens_nomask, **kwargs)
+        if 'src_tokens_nomask' in kwargs:
+            encoder_input = kwargs['src_tokens_nomask']
+        else:
+            encoder_input = src_tokens
+        src_encoding = self.encoder(encoder_input, **kwargs)
         x, extra = self.decoder(src_tokens, src_encoding,
                                 return_all_hiddens=return_all_hiddens, features_only=features_only, **kwargs)
 
         if classification_head_name is not None:
             x = self.classification_heads[classification_head_name](x)
+
+        extra['src_encoding'] = src_encoding
 
         return x, extra
 
@@ -311,7 +315,7 @@ class BottleneckBERTModel(FairseqEncoderDecoderModel):
         )
 
         logger.info(x["args"])
-        return RobertaHubInterface(x["args"], x["task"], x["models"][0])
+        return BottleneckBERTHubInterface(x["args"], x["task"], x["models"][0])
 
     def upgrade_state_dict_named(self, state_dict, name):
         prefix = name + "." if name != "" else ""

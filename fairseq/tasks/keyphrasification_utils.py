@@ -26,7 +26,6 @@ KP_DATASET_FIELDS = {'scipaper': ('title', 'abstract', 'keywords', None),
                      'wiki': (None, 'text', None, None)}
 
 
-
 def parse_src_fn(ex_dict, title_field, text_field):
     concat_str = ex_dict[title_field] + ' . ' + ex_dict[text_field]
     return concat_str
@@ -54,29 +53,52 @@ def maybe_replace_target(example, label_sample_ratio,
     with data_utils.numpy_seed(seed):
         tgts = []
         for labelset_id, ratio in enumerate(label_sample_ratio):
-            # remove punctuations
-            candicate_labels = [p.strip(string.punctuation) for p in example['target%d' % labelset_id]]
+            candicate_labels = example['target%d' % labelset_id]
+            # ensure each phrase has less than 70 characters and max_phrase_len words
             if max_phrase_len > 0:
-                candicate_labels = [p for p in candicate_labels if len(p.split()) <= max_phrase_len]
-            num_to_sample = min(len(candicate_labels), int(ratio * max_target_phrases))
+                candicate_labels = [p for p in candicate_labels
+                                    if len(p) < 70 and len(re.findall(r"\w+|[^\w\s]", p, re.UNICODE)) <= max_phrase_len]
+            # remove punctuations
+            candicate_labels = [p.strip() for p in candicate_labels if len(p.strip()) > 0]
+
+            # determine number of phrases to sample
+            if len(candicate_labels) == 0:
+                continue
+            if max_target_phrases < 0:
+                num_to_sample = len(candicate_labels)
+            else:
+                num_to_sample = min(len(candicate_labels), int(ratio * max_target_phrases))
+            if num_to_sample == 0:
+                num_to_sample = 1
+
             tgts.extend(np.random.choice(candicate_labels, num_to_sample, replace=False))
 
-        # deduplicate
-        if not allow_duplicate:
-            tgts = list(set(tgts))
+    # deduplicate
+    if not allow_duplicate:
+        tgts = list(set(tgts))
 
-        # shuffle order and randomize target size
-        np.random.shuffle(tgts)
-        if not fix_target_number:
-            tgts = np.random.choice(tgts, size=np.random.randint(len(tgts)) + 1, replace=False).tolist()
+    # invalid example, will be discarded later
+    if len(tgts) == 0:
+        example['target'] = ''
+        return example
 
-        tgt_str = sep_token.join(tgts)
-        example['target'] = tgt_str
+    # print(len(tgts))
+    # print(tgts)
+    # shuffle order and randomize target size
+    np.random.shuffle(tgts)
+    if not fix_target_number:
+        tgts = np.random.choice(tgts, size=np.random.randint(len(tgts)) + 1, replace=False).tolist()
 
-        # add control prefix (number of phrases to output)
-        if add_control_prefix_prob > 0.0 and np.random.rand() < add_control_prefix_prob:
-            prefix_str = '<mixed><number>%d<s>' % (len(tgts))
-            example['source'] = prefix_str + example['source']
+    tgt_str = sep_token.join(tgts)
+    example['target'] = tgt_str
+
+    # print(len(tgts))
+    # print(tgt_str)
+
+    # add control prefix (number of phrases to output)
+    if add_control_prefix_prob > 0.0 and np.random.rand() < add_control_prefix_prob:
+        prefix_str = '<mixed><number>%d<s>' % (len(tgts))
+        example['source'] = prefix_str + example['source']
 
     return example
 
@@ -91,7 +113,7 @@ def parse_kpdict(example, kp_concat_type, dataset_type='scipaper', sep_token='<s
     # Ensure target is a list of phrases. Each phrase is a string, not a list of tokens
     if isinstance(example[keyword_field], str):
         example[keyword_field] = example[keyword_field].split(';')
-    if isinstance(example[keyword_field][0], list):
+    if len(example[keyword_field]) > 0 and isinstance(example[keyword_field][0], list):
         example[keyword_field] = [' '.join(p) for p in example[keyword_field]]
     tgt_kps = example[keyword_field]
 
@@ -174,7 +196,7 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
 
         # present phrases
         if max_target_phrases > 0 and len(pres_phrases) > max_target_phrases / 2:
-            pres_phrases = np.random.choice(pres_phrases, int(max_target_phrases / 2), replace=False)
+            pres_phrases = np.random.choice(pres_phrases, int(max_target_phrases / 2), replace=False).tolist()
 
         num_pres = len(pres_phrases)
         num_header = len(header_phrases)
@@ -187,8 +209,8 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
             num_cat = min(len(category_phrases), random.randint(0, int(max_target_phrases / 2 - len(header_phrases))))
             num_seealso = min(len(seealso_phrases), int(max_target_phrases / 2) - len(header_phrases) - num_cat)
             abs_phrases = header_phrases \
-                          + np.random.choice(category_phrases, num_cat, replace=False)\
-                          + np.random.choice(seealso_phrases, num_seealso, replace=False)
+                          + np.random.choice(category_phrases, num_cat, replace=False).tolist()\
+                          + np.random.choice(seealso_phrases, num_seealso, replace=False).tolist()
 
         # mask random spans
         num_infill = 0
@@ -198,7 +220,7 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
 
             span_lens = []
             while num_word_left > 0:
-                span_len = np.random.choice(span_len_opts, p=len_distrib)
+                span_len = np.random.choice(span_len_opts, p=len_distrib).tolist()
                 if span_len <= num_word_left:
                     span_lens.append(span_len)
                 else:
@@ -254,7 +276,7 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
         # mask random present phrases
         if phrase_corr_rate > 0.0 and len(pres_phrases) > 0:
             num_mask_kp = min(1, int(len(pres_phrases) * phrase_corr_rate))
-            mask_pres_phrases = np.random.choice(pres_phrases, num_mask_kp, replace=False)
+            mask_pres_phrases = np.random.choice(pres_phrases, num_mask_kp, replace=False).tolist()
             for p in mask_pres_phrases:
                 src_text = re.sub(p, '<present>', src_text, flags=re.IGNORECASE)
 
