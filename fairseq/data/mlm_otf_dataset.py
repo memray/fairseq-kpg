@@ -21,12 +21,15 @@ def get_word_spans(tokens, delimiter):
 
     word_spans = []
 
+    # iterate over start position of each token
     for i, word_pos in enumerate(word_start_positions):
-        if i == 0: # first word
-            if word_start_positions[0] > 0:
+        if i == 0:
+            if word_start_positions[0] > 0: # first word
                 word_spans.append((0, word_start_positions[0]))
-            if len(word_start_positions) > 0: # 2nd word
-                word_spans.append((word_start_positions[i], word_start_positions[i + 1]))
+            if len(word_start_positions) == 1:
+                break
+            # add 2nd word
+            word_spans.append((word_start_positions[i], word_start_positions[i + 1]))
         elif i == len(word_start_positions) - 1: # last word
             if word_start_positions[-1] <= len(tokens):
                 word_spans.append((word_start_positions[-1], len(tokens)))
@@ -78,6 +81,7 @@ class MlmOtfDataset(FairseqDataset):
         epoch: int,
         seed: int = 1,
         tokens_per_sample: int = 512,
+        min_tokens_per_sample: int = 0,
         mask_prob: float = 0.15,
         leave_unmasked_prob: float = 0.1,
         random_token_prob: float = 0.1,
@@ -100,6 +104,7 @@ class MlmOtfDataset(FairseqDataset):
         self.epoch = epoch
 
         self.tokens_per_sample = tokens_per_sample
+        self.min_tokens_per_sample = min_tokens_per_sample
         self.mask_prob = mask_prob
         self.leave_unmasked_prob = leave_unmasked_prob
         self.random_token_prob = random_token_prob
@@ -133,7 +138,7 @@ class MlmOtfDataset(FairseqDataset):
 
         def merge(key, left_pad, move_eos_to_beginning=False, pad_to_length=None):
             return data_utils.collate_tokens(
-                [s[key] for s in samples],
+                [s[key] for s in samples if key in s],
                 pad_idx, eos_idx, left_pad, move_eos_to_beginning,
                 pad_to_length=pad_to_length
             )
@@ -153,11 +158,13 @@ class MlmOtfDataset(FairseqDataset):
                                              max_length=self.tokens_per_sample - 2) # account for <bos> and <eos>
 
         lengths = []
-
         cur_seed = (self.seed + self.epoch) if self.shuffle else 0
 
         with data_utils.numpy_seed(cur_seed):
             for sample, tokened_sample in zip(samples, tokenized_samples.encodings):
+                # filter out short sequences
+                if len(tokened_sample.tokens) < self.min_tokens_per_sample:
+                    continue
                 # TODO: whole-word masking currently only works for RoBERTa tokenizer
                 tokens = np.asarray(tokened_sample.tokens)
                 word_spans = get_word_spans(tokens, delimiter='Ġ')
@@ -209,13 +216,14 @@ class MlmOtfDataset(FairseqDataset):
             # if self.split == 'valid':
             #     print(self.text_tokenizer.decode(src_ids))
             #     print(self.text_tokenizer.decode(tgt_ids))
-
-            src_ids = merge(  # [BS x max_len]
-                'source', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
-            tgt_ids = merge(  # [BS x max_len]
-                'target', left_pad=False, pad_to_length=pad_to_length['target'] if pad_to_length is not None else None)
-            src_ids_nomask = merge(  # [BS x max_len]
-                'source_nomask', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
+        if len(lengths) == 0:
+            return {}
+        src_ids = merge(  # [BS x max_len]
+            'source', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
+        tgt_ids = merge(  # [BS x max_len]
+            'target', left_pad=False, pad_to_length=pad_to_length['target'] if pad_to_length is not None else None)
+        src_ids_nomask = merge(  # [BS x max_len]
+            'source_nomask', left_pad=False, pad_to_length=pad_to_length['source'] if pad_to_length is not None else None)
 
         # sort by descending source length
         lengths = torch.LongTensor(lengths)
@@ -230,7 +238,7 @@ class MlmOtfDataset(FairseqDataset):
 
         batch = {
             'id': id,
-            'nsentences': len(samples),
+            'nsentences': len(lengths),
             'ntokens': ntokens,
             'net_input': {
                 'src_tokens': src_ids,

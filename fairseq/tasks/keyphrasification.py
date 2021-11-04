@@ -62,7 +62,7 @@ class KeyphrasificationTask(LegacyFairseqTask):
         parser.add_argument('--add-control-prefix-prob', type=float, default=0.0,
                             help='Roll to decide whether adding a prefix to indicate number of phrases to predict.'
                                  '1.0 always add prefix, 0.0 always not add prefix.')
-        parser.add_argument("--kp-concat-type", choices=KP_CONCAT_TYPES, required=True,
+        parser.add_argument("--kp-concat-type", choices=KP_CONCAT_TYPES,
                             help='how to present target sequence')
         parser.add_argument("--dataset-type", choices=list(KP_DATASET_FIELDS.keys()), required=True,
                             help='Specify type of dataset, select from ' + str(list(KP_DATASET_FIELDS.keys())))
@@ -178,17 +178,22 @@ class KeyphrasificationTask(LegacyFairseqTask):
                 if is_folder:
                     labelset_path = os.path.join(labelset_path, data_file_name)
                     assert os.path.exists(labelset_path), 'labelset data does not exist, path: '+ labelset_path
-
-                label_exs = [json.loads(l) for l in open(labelset_path, 'r')]
-                assert len(label_exs) == len(dataset), \
-                    'Size of additional label data (#=%d) must match the size of dataset (#=%d).' % (len(label_exs), len(dataset))
-                # model's outputs may tokenized, concatenate them to strings
-                if not isinstance(label_exs[0]['pred_sents'][0], str):
-                    for label_ex in label_exs:
-                        label_ex['pred_sents'] = [' '.join(p) for p in label_ex['pred_sents']]
-                [data_ex.update({'target%d' % labelset_id: label_ex['pred_sents']})
-                    for data_ex, label_ex in zip(dataset.example_dicts, label_exs)]
-                del label_exs
+                if labelset_path.startswith('__'):
+                    # dynamic labels like random span will be added in preprocessing
+                    [data_ex.update({'target%d' % labelset_id: labelset_path})
+                     for data_ex in dataset.example_dicts]
+                else:
+                    # load extra labels from disk
+                    label_exs = [json.loads(l) for l in open(labelset_path, 'r')]
+                    assert len(label_exs) == len(dataset), \
+                        'Size of additional label data (#=%d) must match the size of dataset (#=%d).' % (len(label_exs), len(dataset))
+                    # model's outputs may tokenized, concatenate them to strings
+                    if not isinstance(label_exs[0]['pred_sents'][0], str):
+                        for label_ex in label_exs:
+                            label_ex['pred_sents'] = [' '.join(p) for p in label_ex['pred_sents']]
+                    [data_ex.update({'target%d' % labelset_id: label_ex['pred_sents']})
+                        for data_ex, label_ex in zip(dataset.example_dicts, label_exs)]
+                    del label_exs
         else:
             self.args.label_sample_ratio = None
 

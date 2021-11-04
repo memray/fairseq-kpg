@@ -56,6 +56,12 @@ class MlmOtfTask(LegacyFairseqTask):
         parser.add_argument("--num-encoder-workers", type=int, default=20)
 
         parser.add_argument(
+            "--min-tokens-per-sample",
+            default=0,
+            type=int,
+            help="min number of total tokens for samples of BERT dataset",
+        )
+        parser.add_argument(
             "--tokens-per-sample",
             default=512,
             type=int,
@@ -88,6 +94,7 @@ class MlmOtfTask(LegacyFairseqTask):
         self.no_bos_eos = args.no_bos_eos
         self.seed = args.seed
 
+        self.min_tokens_per_sample = args.min_tokens_per_sample
         self.tokens_per_sample = args.tokens_per_sample
         self.mask_prob = args.mask_prob
         self.leave_unmasked_prob = args.leave_unmasked_prob
@@ -171,6 +178,7 @@ class MlmOtfTask(LegacyFairseqTask):
             epoch=epoch,
             seed=self.seed,
             tokens_per_sample=self.tokens_per_sample,
+            min_tokens_per_sample=self.min_tokens_per_sample,
             mask_prob=self.mask_prob,
             leave_unmasked_prob=self.leave_unmasked_prob,
             random_token_prob=self.random_token_prob,

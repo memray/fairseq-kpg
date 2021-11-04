@@ -501,6 +501,11 @@ class BottleneckBERTEncoder(FairseqEncoder):
         src_tokens = torch.cat([cls_tokens, src_tokens], dim=1).long()
 
         # x.shape=(batch, src_len, embed_dim)
+        # print(src_tokens.shape)
+        # print('max=', src_tokens.max())
+        # print('min=', src_tokens.min())
+        # for ex in src_tokens.cpu().numpy().tolist():
+        #     print(ex)
         x, _ = self.extract_features(
             src_tokens, return_all_hiddens=False
         )

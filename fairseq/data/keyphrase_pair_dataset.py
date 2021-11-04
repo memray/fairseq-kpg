@@ -93,7 +93,7 @@ class KeyphrasePairDataset(FairseqDataset):
             pad_to_multiple=1,
     ):
         num_sample = len(samples)
-        samples = [s for s in samples if len(s['source'].strip()) > 0 and len(s['target'].strip()) > 0] # filter empty-target examples
+        samples = [s for s in samples if len(s['source'].strip()) > 0 and len(s['target'].strip()) > 0] # filter empty-target examples out
         # print('#sample: pre-filter=%d, after-filter=%d, diff=%d' % (num_sample, len(samples), num_sample-len(samples)))
 
         if len(samples) == 0:

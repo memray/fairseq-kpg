@@ -73,8 +73,7 @@ class RawTextDataset(FairseqDataset):
     @property
     def sizes(self):
         if self.ex_sizes is None:
-            self.ex_sizes = np.asarray([len(l.split()) for l in self.all_examples])
-
+            self.ex_sizes = np.asarray([len(l.split()) * 1.5 for l in self.all_examples])
         return self.ex_sizes
 
     @property

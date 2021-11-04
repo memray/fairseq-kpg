@@ -1,5 +1,11 @@
+## Bart-MAG
+cd /zfs1/hdaqing/rum20/kp/fairseq-kpg/
+source run/kp_DA/bart-mag_4gpu.sh
+
+
 ## Freezable
 cd /zfs1/hdaqing/rum20/kp/fairseq-kpg/
+source run/bottleneck/pretrain_token.sh
 source run/bottleneck/pretrain_attention.sh
 
 ## RoBERTa

@@ -235,7 +235,13 @@ def train(
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
         ):
+            if any([s is None or len(s) == 0 for s in samples]):
+                # TODO@memray to avoid Assertion error Invalid dummy batch
+                valid_losses, should_stop = [0.0], False
+                continue
             # print('step', i, '\t len(sample)=', len(samples), '\t #dp=', sum([len(s['id']) for s in samples]))
+            # print('\t', [l for s in samples for l in s['net_input']['src_lengths'].numpy().tolist()])
+            # print('\t', [l for s in samples for l in list(s['target'].shape)])
             # for s in samples: print(s['id'].numpy())
             log_output = trainer.train_step(samples)
 

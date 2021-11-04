@@ -160,13 +160,12 @@ def load_pretrain_dataset(
                        seed=seed + epoch if shuffle else 0)
 
     return KeyphrasePairDataset(
-        raw_dataset, src_dict=dictionary, src_sizes=raw_dataset.sizes,
-        text_tokenizer=text_tokenizer, parse_fn=parse_fn,
+        raw_dataset, vocab=dictionary, sizes=raw_dataset.sizes,
+        text_tokenizer=text_tokenizer, transform_fns=[parse_fn],
         shuffle=shuffle,
         left_pad_source=left_pad_source,
         left_pad_target=left_pad_target,
         max_source_length=max_source_length,
         max_target_length=max_target_length,
-        num_buckets=num_buckets,
         pad_to_multiple=pad_to_multiple,
     )

@@ -5,6 +5,7 @@
 import random
 import re
 import string
+import warnings
 
 import numpy as np
 
@@ -31,6 +32,93 @@ def parse_src_fn(ex_dict, title_field, text_field):
     return concat_str
 
 
+geometric_p = 0.2
+max_phrase_len = 8
+span_len_opts = list(range(1, max_phrase_len + 1))
+len_distrib = [geometric_p * (1 - geometric_p) ** (i - 1) for i in
+               range(1, max_phrase_len + 1)] if geometric_p >= 0 else None
+len_distrib = [x / (sum(len_distrib)) for x in len_distrib]
+
+def random_span_parse_fn(ex, sep_token,
+                         num_spans=None,
+                         max_target_phrases=8,
+                         return_masked_source=True,
+                         seed=0):
+    """
+    :param ex:
+    :param num_spans: if set, will sample this many spans, otherwise it samples a random number of spans
+    :param sep_token:
+    :param max_target_phrases:
+    :param lowercase:
+    :return:
+    """
+    assert max_target_phrases > 0, 'max_target_phrases must be a positive integer'
+    src_text = ex['source']
+
+    with data_utils.numpy_seed(seed):
+        # mask random spans
+        src_tokens = src_text.split()
+
+        span_lens = []
+        if not num_spans:
+            num_spans = np.random.random_integers(max_target_phrases)
+        for i in range(num_spans):
+            span_len = max(1, np.random.choice(span_len_opts, p=len_distrib))
+            span_lens.append(span_len)
+
+        span_lens = sorted(span_lens, reverse=True)  # ensure larger spans get processed first
+
+        spans = []
+        uncovered_spans = [(0, len(src_tokens))]
+        for span_len in span_lens:
+            candicate_spans, noncandicate_spans = [], []
+            for s in uncovered_spans:
+                if s[1] - s[0] >= span_len:
+                    candicate_spans.append(s)
+                else:
+                    noncandicate_spans.append(s)
+
+            if len(candicate_spans) == 0:
+                # not possible to fit this span
+                continue
+            candicate_span_id = random.choice(range(len(candicate_spans)))
+            candicate_span = candicate_spans[candicate_span_id]
+            candicate_span_len = candicate_span[1] - candicate_span[0]
+
+            # sample a span start given the candidate
+            span_start_offset = random.randint(0, candicate_span_len - span_len + 1)
+            span_left = candicate_span[0] + span_start_offset
+            spans.append((span_left, span_left + span_len))
+
+            # maintain the new candidate lists
+            if span_start_offset == 0:
+                leftover_spans = [(candicate_span[0] + span_len, candicate_span[1] + 1)]
+            elif span_start_offset == candicate_span_len - span_len:
+                leftover_spans = [(candicate_span[0], candicate_span[1] - span_len)]
+            else:
+                leftover_spans = [(candicate_span[0], span_left), (span_left + span_len, candicate_span[1] + 1)]
+
+            uncovered_spans = noncandicate_spans + leftover_spans
+
+        masked_src_tokens = []
+        prev_span_end = 0
+        for s in spans:
+            masked_src_tokens.extend(src_tokens[prev_span_end: s[0]])
+            masked_src_tokens.append('<infill>')
+            prev_span_end = s[1]
+        masked_src_tokens.extend(src_tokens[prev_span_end:])
+
+        infill_phrases = [' '.join(src_tokens[s[0]: s[1]]) for s in spans]
+        if return_masked_source:
+            src_text = ' '.join(masked_src_tokens)
+        else:
+            src_text = src_text
+
+    tgt_text = sep_token.join(infill_phrases)
+
+    return src_text, tgt_text, infill_phrases
+
+
 def maybe_replace_target(example, label_sample_ratio,
                          max_target_phrases, max_phrase_len=-1,
                          add_control_prefix_prob=0.0,
@@ -49,29 +137,55 @@ def maybe_replace_target(example, label_sample_ratio,
     '''
     if not label_sample_ratio: # label set is not given, directly return
         return example
-
+    if max_target_phrases < 0:
+        max_target_phrases = 100000 # a very large number
+    src_str, tgt_str = example['source'], example['target']
     with data_utils.numpy_seed(seed):
         tgts = []
         for labelset_id, ratio in enumerate(label_sample_ratio):
-            candicate_labels = example['target%d' % labelset_id]
-            # ensure each phrase has less than 70 characters and max_phrase_len words
-            if max_phrase_len > 0:
-                candicate_labels = [p for p in candicate_labels
-                                    if len(p) < 70 and len(re.findall(r"\w+|[^\w\s]", p, re.UNICODE)) <= max_phrase_len]
-            # remove punctuations
-            candicate_labels = [p.strip() for p in candicate_labels if len(p.strip()) > 0]
+            candicate_tgts = example['target%d' % labelset_id]
+            if isinstance(candicate_tgts, list):
+                # ensure each phrase has less than 70 characters and max_phrase_len words
+                if max_phrase_len > 0:
+                    candicate_tgts = [p for p in candicate_tgts
+                                        if len(p) < 70 and len(re.findall(r"\w+|[^\w\s]", p, re.UNICODE)) <= max_phrase_len]
+                # remove punctuations
+                candicate_tgts = [p.strip() for p in candicate_tgts if len(p.strip()) > 0]
 
-            # determine number of phrases to sample
-            if len(candicate_labels) == 0:
-                continue
-            if max_target_phrases < 0:
-                num_to_sample = len(candicate_labels)
+                # determine number of phrases to sample
+                if len(candicate_tgts) == 0:
+                    continue
+                if max_target_phrases < 0:
+                    num_to_sample = len(candicate_tgts)
+                else:
+                    num_to_sample = min(len(candicate_tgts), int(ratio * max_target_phrases))
+                if num_to_sample == 0:
+                    num_to_sample = 1
+
+                tgts.extend(np.random.choice(candicate_tgts, num_to_sample, replace=False))
+            elif isinstance(candicate_tgts, str) and candicate_tgts == '__annotated_kp':
+                # ground-truth keyphrases
+                assert 'keywords_tokens' in example, 'keywords_tokens not found in example, ' \
+                                                     'please ensure the keyphrase transform has run precedingly in the pipeline'
+                candicate_tgts = example['keywords_tokens']
+                candicate_tgts = [' '.join(p) for p in candicate_tgts]
+                if len(candicate_tgts) == 0:
+                    continue
+                num_to_sample = max(1, min(len(candicate_tgts), int(ratio * max_target_phrases)))
+                candicate_tgts = np.random.choice(candicate_tgts, num_to_sample, replace=False)
+                np.random.shuffle(candicate_tgts)
+            elif isinstance(candicate_tgts, str) and candicate_tgts == '__random_span':
+                num_to_sample = max(1, int(ratio * max_target_phrases))
+                if num_to_sample > 20:
+                    warnings.warn(
+                        "current number of random span is %d, please ensure that max_target_phrases is properly set, rather than -1",
+                        RuntimeWarning)
+                # random spans
+                src_str, tgt_str, candicate_tgts = random_span_parse_fn(example, sep_token=sep_token, num_spans=num_to_sample, seed=seed)
             else:
-                num_to_sample = min(len(candicate_labels), int(ratio * max_target_phrases))
-            if num_to_sample == 0:
-                num_to_sample = 1
+                raise NotImplementedError('Not supported type:' + candicate_tgts)
 
-            tgts.extend(np.random.choice(candicate_labels, num_to_sample, replace=False))
+            tgts.extend(candicate_tgts)
 
     # deduplicate
     if not allow_duplicate:
@@ -84,8 +198,9 @@ def maybe_replace_target(example, label_sample_ratio,
 
     # print(len(tgts))
     # print(tgts)
-    # shuffle order and randomize target size
-    np.random.shuffle(tgts)
+    # shuffle order and randomize target size, disabled since random span positions should align with input
+    # np.random.shuffle(tgts)
+
     if not fix_target_number:
         tgts = np.random.choice(tgts, size=np.random.randint(len(tgts)) + 1, replace=False).tolist()
 
@@ -98,7 +213,9 @@ def maybe_replace_target(example, label_sample_ratio,
     # add control prefix (number of phrases to output)
     if add_control_prefix_prob > 0.0 and np.random.rand() < add_control_prefix_prob:
         prefix_str = '<mixed><number>%d<s>' % (len(tgts))
-        example['source'] = prefix_str + example['source']
+        example['source'] = prefix_str + src_str
+    else:
+        example['source'] = src_str
 
     return example
 
@@ -288,7 +405,11 @@ def wiki_ex_parse_fn(ex_dict, sep_token,
 
     if lowercase:
         return src_text.lower(), tgt_text.lower()
-    return src_text, tgt_text
+    return {
+            'id': ex_dict['id'],
+            'source': src_text,
+            'target': tgt_text
+    }
 
 
 def obtain_sorted_indices(src, tgt_seqs, sort_by, seed):
