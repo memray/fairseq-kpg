@@ -1,3 +1,10 @@
+@SF
+cd /export/share/ruimeng/project/kp/fairseq-kpg
+source run/mlm/pretrain_roberta_base_8gpu.sh
+
+
+
+
 ## Bart-MAG
 cd /zfs1/hdaqing/rum20/kp/fairseq-kpg/
 source run/kp_DA/bart-mag_4gpu.sh
@@ -30,6 +37,11 @@ On a single 16gb V100, max-tokens=512
   - update-freq=16, the dynamic batch size is 30.x, 4min per 100step, occasionally OOM, 1.5k step per hr, 36k step per day
 
 With A100*8, expect max-tokens=512*4=2048, update-freq=4, the dynamic batch size is base*num_gpu*max_token_ratio=8*8*(2048/512)=256
+
+
+## Reproduce RoBERTa
+export/share/ruimeng/data/wiki/paragraph/train/;/export/share/ruimeng/data/books1/train/ --valid-data /export/share/ruimeng/data/wiki/paragraph/valid/;/export/share/ruimeng/data/books1/valid/ --validate-interval 1000 --save-dir /export/share/ruimeng/exp/pretrain/roberta/ckpts --task mlm_otf --arch roberta_base --bpe hf_pretrained_bpe --bpe-vocab /export/share/ruimeng/data/misc/hf_vocab/roberta-base-kp/vocab.json --bpe-merges /export/share/ruimeng/data/misc/hf_vocab/roberta-base-kp/merges.txt --dict-path /export/share/ruimeng/data/misc/hf_vocab/roberta-base-kp/dict.txt --bpe-dropout 0.1 --ddp-backend=no_c10d --criterion label_smoothed_cross_entropy --reset-optimizer --reset-dataloader --reset-meters --required-batch-size-multiple 1 --optimizer adam --adam-betas "(0.9, 0.98)" --adam-eps 1e-06 --lr 5e-4 --lr-scheduler polynomial_decay --label-smoothing 0.1 --dropout 0.1 --attention-dropout 0.1 --weight-decay 0.01 --log-format simple --log-interval 100 --seed 7 --fixed-validation-seed 7 --no-bos-eos --min-tokens-per-sample 32 --tokens-per-sample 500 --max-positions 512 --max-tokens 1024 --update-freq 8 --text-field text --clip-norm 0.0 --save-interval-updates 5000 --warmup-updates 5000 --total-num-update 100000 --num-workers 32 --find-unused-parameters --memory-efficient-fp16 --ddp-backend=no_c10d --wandb-project bottleneck_bert
+
 
 
 ## Commands

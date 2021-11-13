@@ -158,7 +158,7 @@ class MlmOtfDataset(FairseqDataset):
                                              max_length=self.tokens_per_sample - 2) # account for <bos> and <eos>
 
         lengths = []
-        cur_seed = (self.seed + self.epoch) if self.shuffle else 0
+        cur_seed = (self.seed + self.epoch) if self.shuffle and self.split != 'valid' else 0
 
         with data_utils.numpy_seed(cur_seed):
             for sample, tokened_sample in zip(samples, tokenized_samples.encodings):

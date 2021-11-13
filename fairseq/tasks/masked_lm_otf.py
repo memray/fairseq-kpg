@@ -133,10 +133,11 @@ class MlmOtfTask(LegacyFairseqTask):
         assert len(paths) > 0
 
         if split == 'train':
-            # Pretraining data such as wiki is stored in folders (AA,AB,AC etc.), each contains multiple files (shards)
-            # in each epoch we only load one folder
-            paths = utils.split_paths(self.args.data)
-            subdir_paths = sorted([os.path.join(path, subdir) for path in paths for subdir in os.listdir(path)])
+            subdir_paths = utils.split_paths(self.args.data)
+            # (deprecated) Pretraining data such as wiki is stored in folders (AA,AB,AC etc.), each contains multiple files (shards) in each epoch we only load one folder
+            subdir_paths = sorted([os.path.join(path, subdir) for path in subdir_paths for subdir in os.listdir(path)])
+            with data_utils.numpy_seed(self.seed):
+                np.random.shuffle(subdir_paths)
             subdir_paths = [subdir_paths[(epoch - 1) % len(subdir_paths)]]
         elif split == 'valid':
             subdir_paths = utils.split_paths(self.args.valid_data)
@@ -145,7 +146,7 @@ class MlmOtfTask(LegacyFairseqTask):
 
         data_files = []
         # TODO for now it only supports wiki/book yet
-        file_pattern = r'wiki_\d+|book_\d+\.json'
+        file_pattern = r'.*?(wiki_\d+|book_\d+)\.json'
 
         for subdir_path in sorted(subdir_paths):
             _data_files = []
