@@ -102,11 +102,28 @@ try:
     extensions.extend(
         [
             cpp_extension.CppExtension(
+                "fairseq.libbase",
+                sources=[
+                    "fairseq/clib/libbase/balanced_assignment.cpp",
+                ],
+            )
+        ]
+    )
+
+    extensions.extend(
+        [
+            cpp_extension.CppExtension(
                 "fairseq.libnat",
                 sources=[
                     "fairseq/clib/libnat/edit_dist.cpp",
                 ],
-            )
+            ),
+            cpp_extension.CppExtension(
+                "alignment_train_cpu_binding",
+                sources=[
+                    "examples/operators/alignment_train_cpu.cpp",
+                ],
+            ),
         ]
     )
     if "CUDA_HOME" in os.environ:
@@ -124,6 +141,13 @@ try:
                     sources=[
                         "fairseq/clib/cuda/ngram_repeat_block_cuda.cpp",
                         "fairseq/clib/cuda/ngram_repeat_block_cuda_kernel.cu",
+                    ],
+                ),
+                cpp_extension.CppExtension(
+                    "alignment_train_cuda_binding",
+                    sources=[
+                        "examples/operators/alignment_train_kernel.cu",
+                        "examples/operators/alignment_train_cuda.cpp",
                     ],
                 ),
             ]
@@ -190,7 +214,7 @@ def do_setup(package_data):
             "cffi",
             "cython",
             'dataclasses; python_version<"3.7"',
-            "hydra-core<1.1",
+            "hydra-core>=1.0.7,<1.1",
             "omegaconf<2.1",
             'numpy<1.20.0; python_version<"3.7"',
             'numpy; python_version>="3.7"',
@@ -198,6 +222,8 @@ def do_setup(package_data):
             "sacrebleu>=1.4.12",
             "torch",
             "tqdm",
+            "bitarray",
+            "torchaudio>=0.8.0",
         ],
         dependency_links=dependency_links,
         packages=find_packages(
@@ -242,18 +268,19 @@ def get_files(path, relative_to="fairseq"):
     return all_files
 
 
-try:
-    # symlink examples into fairseq package so package_data accepts them
-    fairseq_examples = os.path.join("fairseq", "examples")
-    if "build_ext" not in sys.argv[1:] and not os.path.exists(fairseq_examples):
-        os.symlink(os.path.join("..", "examples"), fairseq_examples)
+if __name__ == "__main__":
+    try:
+        # symlink examples into fairseq package so package_data accepts them
+        fairseq_examples = os.path.join("fairseq", "examples")
+        if "build_ext" not in sys.argv[1:] and not os.path.exists(fairseq_examples):
+            os.symlink(os.path.join("..", "examples"), fairseq_examples)
 
-    package_data = {
-        "fairseq": (
-            get_files(fairseq_examples) + get_files(os.path.join("fairseq", "config"))
-        )
-    }
-    do_setup(package_data)
-finally:
-    if "build_ext" not in sys.argv[1:] and os.path.exists(fairseq_examples):
-        os.unlink(fairseq_examples)
+        package_data = {
+            "fairseq": (
+                get_files(fairseq_examples) + get_files(os.path.join("fairseq", "config"))
+            )
+        }
+        do_setup(package_data)
+    finally:
+        if "build_ext" not in sys.argv[1:] and os.path.islink(fairseq_examples):
+            os.unlink(fairseq_examples)

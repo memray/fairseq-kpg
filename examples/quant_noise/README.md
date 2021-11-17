@@ -33,7 +33,7 @@ Unlike the section [Iterative Product Quantization](#iterative-product-quantizat
 
 #### Training
 
-Scalar quantization with Quant-Noise consists in randomly quantizing a proportion `p` of the weights during training. Scalar quantization is implemented [here](https://github.com/pytorch/fairseq/tree/master/fairseq/modules/quantization/scalar) under the form of Fake Quantization, meaning that we emulate int8 on GPU by quantizing and de-quantizing both the weights and the activations. We rely on PyTorch's [quantization primitives](https://github.com/pytorch/pytorch/tree/master/torch/quantization).
+Scalar quantization with Quant-Noise consists in randomly quantizing a proportion `p` of the weights during training. Scalar quantization is implemented [here](https://github.com/pytorch/fairseq/tree/main/fairseq/modules/quantization/scalar) under the form of Fake Quantization, meaning that we emulate int8 on GPU by quantizing and de-quantizing both the weights and the activations. We rely on PyTorch's [quantization primitives](https://github.com/pytorch/pytorch/tree/master/torch/quantization).
 
 To train a model with Quant-Noise, add the following flag:
 ```
@@ -49,7 +49,7 @@ When evaluating a network, all quantized modules and activation hooks automatica
 #### Integration with your own code
 
 Looking to quantize your own models with Quant-Noise + Scalar Quantization?
-- Use the function `quantize_model_` implemented [here](https://github.com/pytorch/fairseq/tree/master/fairseq/modules/quantization/scalar/utils.py) to (1) replace all your modules by their quantized counterparts and (2) add hooks to those modules to quantize the activations.
+- Use the function `quantize_model_` implemented [here](https://github.com/pytorch/fairseq/tree/main/fairseq/modules/quantization/scalar/utils.py) to (1) replace all your modules by their quantized counterparts and (2) add hooks to those modules to quantize the activations.
 - Then, perform your training as usual. Note that in `eval()` mode, the network is always fully quantized (weights and activations) by default (`p=1`).
 
 
@@ -66,12 +66,12 @@ To train a model with Quant-Noise, add the following flags:
 --quant-noise-pq 0.1 --quant-noise-pq-block-size 8
 ```
 `quant-noise-pq` controls how much dropout is applied to the blocks of the weight matrix. `quant-noise-pq-block-size` controls the size of the weight matrix blocks.
-We recommend training with 0.05 to 0.2 Quant-Noise, a value that worked well in our experiments. For the block-size, we recommend training with block-size of 8. Note that the block size must be a multiple of `input_features`, see the size checks [here](https://github.com/pytorch/fairseq/tree/master/fairseq/modules/quant_noise.py). Large block sizes result in higher compression ratio but may induce a loss in accuracy.
+We recommend training with 0.05 to 0.2 Quant-Noise, a value that worked well in our experiments. For the block-size, we recommend training with block-size of 8. Note that the block size must be a multiple of `input_features`, see the size checks [here](https://github.com/pytorch/fairseq/tree/main/fairseq/modules/quant_noise.py). Large block sizes result in higher compression ratio but may induce a loss in accuracy.
 
-We currently support training Transformer based models, such as sequence-to-sequence, language models, and BERT architectures. The `quant_noise` function [here](https://github.com/pytorch/fairseq/tree/master/fairseq/modules/quant_noise.py) wraps a module. It splits a weight matrix into blocks and applies random dropout to these blocks.
+We currently support training Transformer based models, such as sequence-to-sequence, language models, and BERT architectures. The `quant_noise` function [here](https://github.com/pytorch/fairseq/tree/main/fairseq/modules/quant_noise.py) wraps a module. It splits a weight matrix into blocks and applies random dropout to these blocks.
 In the Transformer architectures, quant-noise is applied to the input and output embeddings, the attention, and the FFN.
 
-Quant-Noise can also be combined with **LayerDrop** (see [here](https://github.com/pytorch/fairseq/tree/master/examples/layerdrop)) to add its pruning effect to the quantized model and make the model even smaller. We recommend training with LayerDrop 0.1 or 0.2.
+Quant-Noise can also be combined with **LayerDrop** (see [here](https://github.com/pytorch/fairseq/tree/main/examples/layerdrop)) to add its pruning effect to the quantized model and make the model even smaller. We recommend training with LayerDrop 0.1 or 0.2.
 
 #### Quantization
 
@@ -84,8 +84,8 @@ For the particular case of PQ, quantization is made sequentially. We recommend f
 #### Integration with your own code
 
 Looking to quantize your own models with Quant-Noise + iPQ?
-- First wrap your modules with the `quant_noise` function [here](https://github.com/pytorch/fairseq/tree/master/fairseq/modules/quant_noise.py), which is module-agnostic and train your favorite model.
-- Then, quantize your trained model using the code [here](https://github.com/pytorch/fairseq/tree/master/fairseq/modules/quantization/pq). This can be done *without any changes to your training loop*. Below is an example code for integration.
+- First wrap your modules with the `quant_noise` function [here](https://github.com/pytorch/fairseq/tree/main/fairseq/modules/quant_noise.py), which is module-agnostic and train your favorite model.
+- Then, quantize your trained model using the code [here](https://github.com/pytorch/fairseq/tree/main/fairseq/modules/quantization/pq). This can be done *without any changes to your training loop*. Below is an example code for integration.
 Note that we tried our approach only on Transformers and various Convolutional Models such as EfficientNets.
 
 ```python
@@ -128,7 +128,7 @@ We detail below how to reproduce the state-of-the-art results in reported in the
 
 ### Training with Quant-Noise
 
-To **train** RoBERTa + QuantNoise, we followed this setting [here](https://github.com/pytorch/fairseq/tree/master/examples/roberta).
+To **train** RoBERTa + QuantNoise, we followed this setting [here](https://github.com/pytorch/fairseq/tree/main/examples/roberta).
 The following command can be used to train a RoBERTa Base + QuantNoise model:
 
 ```bash
@@ -154,11 +154,11 @@ fairseq-train $DATA_DIR \
     --batch-size $MAX_SENTENCES \
     --update-freq $UPDATE_FREQ --max-update $TOTAL_UPDATES \
     --save-dir checkpoint/roberta \
-    --ddp-backend no_c10d --encoder-layerdrop 0.2 \
+    --ddp-backend legacy_ddp --encoder-layerdrop 0.2 \
     --quant-noise-pq 0.2 --quant-noise-pq-block-size 8 --untie-weights-roberta
 ```
 
-To **finetune** RoBERTa + QuantNoise, we followed this setting [here](https://github.com/pytorch/fairseq/blob/master/examples/roberta/README.glue.md).
+To **finetune** RoBERTa + QuantNoise, we followed this setting [here](https://github.com/pytorch/fairseq/blob/main/examples/roberta/README.glue.md).
 The following command can be used to finetune a RoBERTa Base + QuantNoise model on the RTE dataset:
 
 ```bash
@@ -189,11 +189,11 @@ fairseq-train /path/to/rte/data/ \
     --max-epoch 10 \
     --find-unused-parameters \
     --best-checkpoint-metric accuracy --maximize-best-checkpoint-metric \
-    --ddp-backend no_c10d \
+    --ddp-backend legacy_ddp \
     --quant-noise-pq 0.2 --quant-noise-pq-block-size 8
 ```
 
-To **train** Language Models on Wikitext-103, we followed this setting [here](https://github.com/pytorch/fairseq/tree/master/examples/language_model).
+To **train** Language Models on Wikitext-103, we followed this setting [here](https://github.com/pytorch/fairseq/tree/main/examples/language_model).
 The following command can be used to train a Transformer + QuantNoise model on Wikitext-103:
 
 ```bash
@@ -205,7 +205,7 @@ fairseq-train --task language_modeling /path/to/wikitext-103/data \
     --arch transformer_lm_gbw \
     --attention-dropout 0.1 --dropout 0.2 --relu-dropout 0.1 \
     --clip-norm 0.1 --criterion adaptive_loss \
-    --ddp-backend no_c10d \
+    --ddp-backend legacy_ddp \
     --decoder-attention-heads 8 --decoder-embed-dim 1024 --decoder-ffn-embed-dim 4096 --decoder-input-dim 1024 \
     --decoder-layers 16 --decoder-normalize-before --decoder-output-dim 1024 \
     --min-lr 0.0001 --lr-period-updates 270000 --lr-scheduler cosine --lr-shrink 0.75 --lr 1.0 --t-mult 2.0 \
@@ -252,7 +252,7 @@ fairseq-train --task sentence_prediction /path/to/data/ \
     --weight-decay 0.1 --optimizer adam --adam-betas "(0.9, 0.98)" --adam-eps 1e-06 \
     --clip-norm 0.0 --lr-scheduler polynomial_decay \
     --fp16 --fp16-init-scale 4 --threshold-loss-scale 1 --fp16-scale-window 128 \
-    --no-progress-bar --skip-invalid-size-inputs-valid-test --ddp-backend no_c10d \
+    --no-progress-bar --skip-invalid-size-inputs-valid-test --ddp-backend legacy_ddp \
     --quantization-config-path /path/to/config/yaml
 ```
 
@@ -266,7 +266,7 @@ fairseq-train --task language_modeling /path/to/wikitext-103/data \
     --attention-dropout 0.1 --dropout 0.2 --relu-dropout 0.1  \
     --bucket-cap-mb 25 --char-embedder-highway-layers 2 --character-embedding-dim 4 \
     --clip-norm 0.1 --criterion adaptive_loss \
-    --ddp-backend no_c10d \
+    --ddp-backend legacy_ddp \
     --decoder-attention-heads 8 --decoder-embed-dim 1024 --decoder-ffn-embed-dim 4096 --decoder-input-dim 1024 --decoder-layers 16 --decoder-normalize-before --decoder-output-dim 1024 \
     --fp16 --keep-last-epochs -1 \
     --min-lr 0.0001 --lr-period-updates 270000 --lr-scheduler cosine --lr-shrink 0.75 --lr 0.05 --stop-min-lr 1e-09 \

@@ -6,6 +6,7 @@
 
 from .adaptive_input import AdaptiveInput
 from .adaptive_softmax import AdaptiveSoftmax
+from .base_layer import BaseLayer
 from .beamable_mm import BeamableMM
 from .character_token_embedder import CharacterTokenEmbedder
 from .conv_tbc import ConvTBC
@@ -24,6 +25,8 @@ from .layer_norm import Fp32LayerNorm, LayerNorm
 from .learned_positional_embedding import LearnedPositionalEmbedding
 from .lightweight_convolution import LightweightConv, LightweightConv1dTBC
 from .linearized_convolution import LinearizedConvolution
+from .location_attention import LocationAttention
+from .lstm_cell_with_zoneout import LSTMCellWithZoneOut
 from .multihead_attention import MultiheadAttention
 from .positional_embedding import PositionalEmbedding
 from .same_pad import SamePad
@@ -39,6 +42,7 @@ from .vggblock import VGGBlock
 __all__ = [
     "AdaptiveInput",
     "AdaptiveSoftmax",
+    "BaseLayer",
     "BeamableMM",
     "CharacterTokenEmbedder",
     "ConvTBC",
@@ -61,6 +65,8 @@ __all__ = [
     "LightweightConv1dTBC",
     "LightweightConv",
     "LinearizedConvolution",
+    "LocationAttention",
+    "LSTMCellWithZoneOut",
     "MultiheadAttention",
     "PositionalEmbedding",
     "SamePad",

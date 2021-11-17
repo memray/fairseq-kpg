@@ -66,7 +66,7 @@ class BottleneckBERTHubInterface(nn.Module):
 class RobertaHubInterface(nn.Module):
     """A simple PyTorch Hub interface to RoBERTa.
 
-    Usage: https://github.com/pytorch/fairseq/tree/master/examples/roberta
+    Usage: https://github.com/pytorch/fairseq/tree/main/examples/roberta
     """
 
     def __init__(self, cfg, task, model):
@@ -225,7 +225,7 @@ class RobertaHubInterface(nn.Module):
             add_if_not_exist=False,
         )
 
-        masked_index = (tokens == self.task.mask_idx).nonzero()
+        masked_index = (tokens == self.task.mask_idx).nonzero(as_tuple=False)
         if tokens.dim() == 1:
             tokens = tokens.unsqueeze(0)
 

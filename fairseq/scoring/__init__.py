@@ -37,10 +37,9 @@ _build_scorer, register_scorer, SCORER_REGISTRY, _ = registry.setup_registry(
 
 
 def build_scorer(choice, tgt_dict):
-    if isinstance(choice, DictConfig):
-        choice = choice._name
+    _choice = choice._name if isinstance(choice, DictConfig) else choice
 
-    if choice == "bleu":
+    if _choice == "bleu":
         from fairseq.scoring import bleu
 
         return bleu.Scorer(
@@ -50,7 +49,7 @@ def build_scorer(choice, tgt_dict):
 
 
 # automatically import any Python files in the current directory
-for file in os.listdir(os.path.dirname(__file__)):
+for file in sorted(os.listdir(os.path.dirname(__file__))):
     if file.endswith(".py") and not file.startswith("_"):
         module = file[: file.find(".py")]
         importlib.import_module("fairseq.scoring." + module)

@@ -18,7 +18,6 @@ from itertools import chain
 import numpy as np
 import torch
 from fairseq import checkpoint_utils, options, scoring, tasks, utils
-from fairseq.data import encoders
 from fairseq.dataclass.utils import convert_namespace_to_omegaconf
 from fairseq.logging import progress_bar
 from fairseq.logging.meters import StopwatchMeter, TimeMeter
@@ -170,8 +169,8 @@ def _main(cfg: DictConfig, output_file):
     )
 
     # Handle tokenization and BPE
-    tokenizer = encoders.build_tokenizer(cfg.tokenizer)
-    bpe = encoders.build_bpe(cfg.bpe)
+    tokenizer = task.build_tokenizer(cfg.tokenizer)
+    bpe = task.build_bpe(cfg.bpe)
 
     def decode_fn(x):
         if bpe is not None:
@@ -401,6 +400,12 @@ def _main(cfg: DictConfig, output_file):
 
 def cli_main():
     parser = options.get_generation_parser()
+    # TODO: replace this workaround with refactoring of `AudioPretraining`
+    parser.add_argument(
+        '--arch', '-a', metavar='ARCH', default="wav2vec2",
+        help='Model architecture. For constructing tasks that rely on '
+             'model args (e.g. `AudioPretraining`)'
+    )
     args = options.parse_args_and_arch(parser)
     main(args)
 
