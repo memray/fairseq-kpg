@@ -496,6 +496,7 @@ class BottleneckBERTEncoder(FairseqEncoder):
             tuple:
                 - encoding output of shape `(batch, num_bottleneck_token, hid_dim)`
         """
+        # cls_id is 0, so cls_tokens = [0] * num_bottleneck_tokens
         cls_tokens = torch.zeros([src_tokens.shape[0], self.num_bottleneck_tokens],
                                  device=src_tokens.device, dtype=src_tokens.dtype)
         src_tokens = torch.cat([cls_tokens, src_tokens], dim=1).long()

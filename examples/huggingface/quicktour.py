@@ -47,9 +47,11 @@ start_time = time.time()
 # print(len(texts))
 for i in tqdm.tqdm(range(10)):
     print(i)
-    # dataset.map(encode, batched=True)
+    '''
     for t in texts:
         tokenizer(t)
+    '''
+    tokenizer(texts)
 
 current_time = time.time()
 elapsed_time = current_time - start_time

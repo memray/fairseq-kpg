@@ -1,5 +1,8 @@
 @SF
-cd /export/share/ruimeng/project/kp/fairseq-kpg
+cd /export/share/ruimeng/project/te/fairseq-kpg
+source run/mlm/pretrain_roberta_base_8gpu_step500k.sh
+source run/mlm/pretrain_bottleneck_attention_base_8gpu.sh
+source run/mlm/pretrain_bottleneck_token_base_8gpu.sh
 source run/mlm/pretrain_roberta_base_8gpu.sh
 
 

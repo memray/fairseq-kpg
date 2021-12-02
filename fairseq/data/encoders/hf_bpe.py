@@ -1,7 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
+# added by @memray
 import logging
 import os
 
@@ -24,6 +21,9 @@ class HuggingFacePretrainedBPEConfig(FairseqDataclass):
 
 @register_bpe('hf_pretrained_bpe', dataclass=HuggingFacePretrainedBPEConfig)
 class HuggingFacePretrainedBPE(object):
+    def __init__(self, *args, **kwargs):
+        pass
+
     @staticmethod
     def load(args):
         try:

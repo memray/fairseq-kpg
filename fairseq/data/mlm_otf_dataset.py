@@ -162,8 +162,8 @@ class MlmOtfDataset(FairseqDataset):
 
         with data_utils.numpy_seed(cur_seed):
             for sample, tokened_sample in zip(samples, tokenized_samples.encodings):
-                # filter out short sequences
-                if len(tokened_sample.tokens) < self.min_tokens_per_sample:
+                # filter out short sequences for training data
+                if self.split != 'valid' and len(tokened_sample.tokens) < self.min_tokens_per_sample:
                     continue
                 # TODO: whole-word masking currently only works for RoBERTa tokenizer
                 tokens = np.asarray(tokened_sample.tokens)
