@@ -39,7 +39,7 @@ DATA_DIR=data/CommonsenseQA
 FAIRSEQ_PATH=/path/to/fairseq
 FAIRSEQ_USER_DIR=${FAIRSEQ_PATH}/examples/roberta/commonsense_qa
 
-CUDA_VISIBLE_DEVICES=0 fairseq-train --fp16 --ddp-backend=no_c10d \
+CUDA_VISIBLE_DEVICES=0 fairseq-train --fp16 --ddp-backend=legacy_ddp \
     $DATA_DIR \
     --user-dir $FAIRSEQ_USER_DIR \
     --restore-file $ROBERTA_PATH \
@@ -96,4 +96,4 @@ print('Accuracy: ' + str(ncorrect / float(nsamples)))
 ```
 
 The above snippet is not batched, which makes it quite slow. See [instructions
-for batched prediction with RoBERTa](https://github.com/pytorch/fairseq/tree/master/examples/roberta#batched-prediction).
+for batched prediction with RoBERTa](https://github.com/pytorch/fairseq/tree/main/examples/roberta#batched-prediction).

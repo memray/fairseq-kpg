@@ -2,7 +2,7 @@
   <img src="docs/fairseq_logo.png" width="150">
   <br />
   <br />
-  <a href="https://github.com/pytorch/fairseq/blob/master/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
+  <a href="https://github.com/pytorch/fairseq/blob/main/LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
   <a href="https://github.com/pytorch/fairseq/releases"><img alt="Latest Release" src="https://img.shields.io/github/release/pytorch/fairseq.svg" /></a>
   <a href="https://github.com/pytorch/fairseq/actions?query=workflow:build"><img alt="Build Status" src="https://github.com/pytorch/fairseq/workflows/build/badge.svg" /></a>
   <a href="https://fairseq.readthedocs.io/en/latest/?badge=latest"><img alt="Documentation Status" src="https://readthedocs.org/projects/fairseq/badge/?version=latest" /></a>
@@ -48,6 +48,14 @@ We provide reference implementations of various sequence modeling papers:
   + [Linformer: Self-Attention with Linear Complexity (Wang et al., 2020)](examples/linformer/README.md)
   + [Cross-lingual Retrieval for Iterative Self-Supervised Training (Tran et al., 2020)](examples/criss/README.md)
   + [Deep Transformers with Latent Depth (Li et al., 2020)](examples/latent_depth/README.md)
+  + [Unsupervised Cross-lingual Representation Learning for Speech Recognition (Conneau et al., 2020)](https://arxiv.org/abs/2006.13979)
+  + [Self-training and Pre-training are Complementary for Speech Recognition (Xu et al., 2020)](https://arxiv.org/abs/2010.11430)
+  + [Robust wav2vec 2.0: Analyzing Domain Shift in Self-Supervised Pre-Training (Hsu, et al., 2021)](https://arxiv.org/abs/2104.01027)
+  + [Unsupervised Speech Recognition (Baevski, et al., 2021)](https://arxiv.org/abs/2105.11084)
+  + [Simple and Effective Zero-shot Cross-lingual Phoneme Recognition (Xu et al., 2021)](https://arxiv.org/abs/2109.11680)
+  + [VideoCLIP: Contrastive Pre-training for Zero-shot Video-Text Understanding (Xu et. al., 2021)](https://arxiv.org/pdf/2109.14084.pdf)
+  + [VLM: Task-agnostic Video-Language Model Pre-training for Video Understanding (Xu et. al., 2021)](https://aclanthology.org/2021.findings-acl.370.pdf)
+  + [NormFormer: Improved Transformer Pretraining with Extra Normalization (Shleifer et. al, 2021)](examples/normformer/README.md)
 * **Non-autoregressive Transformers**
   + Non-Autoregressive Neural Machine Translation (Gu et al., 2017)
   + Deterministic Non-Autoregressive Neural Sequence Modeling by Iterative Refinement (Lee et al. 2018)
@@ -60,7 +68,16 @@ We provide reference implementations of various sequence modeling papers:
 </p></details>
 
 ### What's New:
-
+* October 2021 [Released VideoCLIP and VLM models](examples/MMPT/README.md)
+* October 2021 [Released multilingual finetuned XLSR-53 model](examples/wav2vec/README.md)
+* September 2021 [`master` branch renamed to `main`](https://github.com/github/renaming).
+* July 2021 [Released DrNMT code](examples/discriminative_reranking_nmt/README.md)
+* July 2021 [Released Robust wav2vec 2.0 model](examples/wav2vec/README.md)
+* June 2021 [Released XLMR-XL and XLMR-XXL models](examples/xlmr/README.md)
+* May 2021 [Released Unsupervised Speech Recognition code](examples/wav2vec/unsupervised/README.md)
+* March 2021 [Added full parameter and optimizer state sharding + CPU offloading](examples/fully_sharded_data_parallel/README.md)
+* February 2021 [Added LASER training code](examples/laser/README.md)
+* December 2020: [Added Adaptive Attention Span code](examples/adaptive_span/README.md)
 * December 2020: [GottBERT model and code released](examples/gottbert/README.md)
 * November 2020: Adopted the [Hydra](https://github.com/facebookresearch/hydra) configuration framework
   * [see documentation explaining how to use it for new and existing projects](docs/hydra_integration.md)
@@ -68,21 +85,21 @@ We provide reference implementations of various sequence modeling papers:
 * October 2020: [Added R3F/R4F (Better Fine-Tuning) code](examples/rxf/README.md)
 * October 2020: [Deep Transformer with Latent Depth code released](examples/latent_depth/README.md)
 * October 2020: [Added CRISS models and code](examples/criss/README.md)
+
+<details><summary>Previous updates</summary><p>
+
 * September 2020: [Added Linformer code](examples/linformer/README.md)
 * September 2020: [Added pointer-generator networks](examples/pointer_generator/README.md)
 * August 2020: [Added lexically constrained decoding](examples/constrained_decoding/README.md)
 * August 2020: [wav2vec2 models and code released](examples/wav2vec/README.md)
 * July 2020: [Unsupervised Quality Estimation code released](examples/unsupervised_quality_estimation/README.md)
-
-<details><summary>Previous updates</summary><p>
-
 * May 2020: [Follow fairseq on Twitter](https://twitter.com/fairseq)
 * April 2020: [Monotonic Multihead Attention code released](examples/simultaneous_translation/README.md)
 * April 2020: [Quant-Noise code released](examples/quant_noise/README.md)
 * April 2020: [Initial model parallel support and 11B parameters unidirectional LM released](examples/megatron_11b/README.md)
 * March 2020: [Byte-level BPE code released](examples/byte_level_bpe/README.md)
 * February 2020: [mBART model and code released](examples/mbart/README.md)
-* February 2020: [Added tutorial for back-translation](https://github.com/pytorch/fairseq/tree/master/examples/backtranslation#training-your-own-model-wmt18-english-german)
+* February 2020: [Added tutorial for back-translation](https://github.com/pytorch/fairseq/tree/main/examples/backtranslation#training-your-own-model-wmt18-english-german)
 * December 2019: [fairseq 0.9.0 released](https://github.com/pytorch/fairseq/releases/tag/v0.9.0)
 * November 2019: [VizSeq released (a visual analysis toolkit for evaluating fairseq models)](https://facebookresearch.github.io/vizseq/docs/getting_started/fairseq_example)
 * November 2019: [CamemBERT model and code released](examples/camembert/README.md)
@@ -108,6 +125,8 @@ We provide reference implementations of various sequence modeling papers:
 * [mixed precision training](https://fairseq.readthedocs.io/en/latest/getting_started.html#training-with-half-precision-floating-point-fp16) (trains faster with less GPU memory on [NVIDIA tensor cores](https://developer.nvidia.com/tensor-cores))
 * [extensible](https://fairseq.readthedocs.io/en/latest/overview.html): easily register new models, criterions, tasks, optimizers and learning rate schedulers
 * [flexible configuration](docs/hydra_integration.md) based on [Hydra](https://github.com/facebookresearch/hydra) allowing a combination of code, command-line and file based configuration
+* [full parameter and optimizer state sharding](examples/fully_sharded_data_parallel/README.md)
+* [offloading parameters to CPU](examples/fully_sharded_data_parallel/README.md)
 
 We also provide [pre-trained models for translation and language modeling](#pre-trained-models-and-examples)
 with a convenient `torch.hub` interface:
@@ -136,8 +155,8 @@ pip install --editable ./
 # on MacOS:
 # CFLAGS="-stdlib=libc++" pip install --editable ./
 
-# to install the latest stable release (0.10.1)
-# pip install fairseq==0.10.1
+# to install the latest stable release (0.10.x)
+# pip install fairseq
 ```
 
 * **For faster training** install NVIDIA's [apex](https://github.com/NVIDIA/apex) library:

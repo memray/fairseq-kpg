@@ -144,11 +144,11 @@ def process_predictions(
             print(
                 "{} ({}-{})".format(tgt_words, speaker, id), file=res_files["ref.words"]
             )
-            # only score top hypothesis
-            if not args.quiet:
-                logger.debug("HYPO:" + hyp_words)
-                logger.debug("TARGET:" + tgt_words)
-                logger.debug("___________________")
+
+        if not args.quiet:
+            logger.info("HYPO:" + hyp_words)
+            logger.info("TARGET:" + tgt_words)
+            logger.info("___________________")
 
         hyp_words = hyp_words.split()
         tgt_words = tgt_words.split()
@@ -191,6 +191,12 @@ def optimize_models(args, use_cuda, models):
             model.cuda()
 
 
+def apply_half(t):
+    if t.dtype is torch.float32:
+        return t.to(dtype=torch.half)
+    return t
+
+
 class ExistingEmissionsDecoder(object):
     def __init__(self, decoder, emissions):
         self.decoder = decoder
@@ -210,12 +216,12 @@ class ExistingEmissionsDecoder(object):
 def main(args, task=None, model_state=None):
     check_args(args)
 
+    use_fp16 = args.fp16
     if args.max_tokens is None and args.batch_size is None:
         args.max_tokens = 4000000
     logger.info(args)
 
     use_cuda = torch.cuda.is_available() and not args.cpu
-
 
     logger.info("| decoding with criterion {}".format(args.criterion))
 
@@ -227,8 +233,8 @@ def main(args, task=None, model_state=None):
         task.load_dataset(args.gen_subset)
     else:
         logger.info("| loading model(s) from {}".format(args.path))
-        models, saved_cfg = checkpoint_utils.load_model_ensemble(
-            utils.split_paths(args.path),
+        models, saved_cfg, task = checkpoint_utils.load_model_ensemble_and_task(
+            utils.split_paths(args.path, separator="\\"),
             arg_overrides=ast.literal_eval(args.model_overrides),
             task=task,
             suffix=args.checkpoint_suffix,
@@ -277,7 +283,7 @@ def main(args, task=None, model_state=None):
             return W2lFairseqLMDecoder(args, task.target_dictionary)
         else:
             print(
-                "only wav2letter decoders with (viterbi, kenlm, fairseqlm) options are supported at the moment"
+                "only flashlight decoders with (viterbi, kenlm, fairseqlm) options are supported at the moment"
             )
 
     # please do not touch this unless you test both generate.py and infer.py with audio_pretraining task
@@ -318,6 +324,8 @@ def main(args, task=None, model_state=None):
         wps_meter = TimeMeter()
         for sample in t:
             sample = utils.move_to_cuda(sample) if use_cuda else sample
+            if use_fp16:
+                sample = utils.apply_to_sample(apply_half, sample)
             if "net_input" not in sample:
                 continue
 

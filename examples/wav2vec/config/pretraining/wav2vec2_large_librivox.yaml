@@ -18,13 +18,14 @@ task:
   normalize: true
 
 dataset:
+  batch_size: 4
   num_workers: 6
   max_tokens: 1200000
   skip_invalid_size_inputs_valid_test: true
 
 distributed_training:
   distributed_world_size: 128
-  ddp_backend: no_c10d
+  ddp_backend: legacy_ddp
 
 criterion:
   _name: wav2vec
