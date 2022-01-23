@@ -175,14 +175,14 @@ class KeyphrasificationTask(LegacyFairseqTask):
             assert sum(self.args.label_sample_ratio) == 1.0
             label_paths = utils.split_paths(self.args.label_data)
             for labelset_id, labelset_path in enumerate(label_paths):
-                if is_folder:
-                    labelset_path = os.path.join(labelset_path, data_file_name)
-                    assert os.path.exists(labelset_path), 'labelset data does not exist, path: '+ labelset_path
                 if labelset_path.startswith('__'):
                     # dynamic labels like random span will be added in preprocessing
                     [data_ex.update({'target%d' % labelset_id: labelset_path})
                      for data_ex in dataset.example_dicts]
                 else:
+                    if is_folder:
+                        labelset_path = os.path.join(labelset_path, data_file_name)
+                        assert os.path.exists(labelset_path), 'labelset data does not exist, path: '+ labelset_path
                     # load extra labels from disk
                     label_exs = [json.loads(l) for l in open(labelset_path, 'r')]
                     assert len(label_exs) == len(dataset), \
