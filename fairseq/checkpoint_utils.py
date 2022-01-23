@@ -6,6 +6,7 @@
 import ast
 import collections
 import contextlib
+import json
 import logging
 import numpy as np
 import os
@@ -31,7 +32,7 @@ from omegaconf import DictConfig, open_dict, OmegaConf
 logger = logging.getLogger(__name__)
 
 
-def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
+def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss, stats_list):
     from fairseq import meters
 
     # only one worker should attempt to create the required dir
@@ -84,6 +85,14 @@ def save_checkpoint(cfg: CheckpointConfig, trainer, epoch_itr, val_loss):
         not hasattr(save_checkpoint, "best")
         or is_better(val_loss, save_checkpoint.best)
     )
+    # @memray, save the best scores
+    if val_loss is not None and \
+            (not hasattr(save_checkpoint, "best") or is_better(val_loss, save_checkpoint.best)):
+        for stats_idx, stats in enumerate(stats_list):
+            save_json_path = os.path.join(cfg.save_dir, "eval_results_valid%d.json" % stats_idx)
+            with open(save_json_path, 'w') as eval_json:
+                eval_json.write(json.dumps(stats))
+
     if val_loss is not None and cfg.keep_best_checkpoints > 0:
         worst_best = getattr(save_checkpoint, "best", None)
         chkpts = checkpoint_paths(

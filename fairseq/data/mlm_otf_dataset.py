@@ -83,12 +83,14 @@ class MlmOtfDataset(FairseqDataset):
         tokens_per_sample: int = 512,
         min_tokens_per_sample: int = 0,
         mask_prob: float = 0.15,
+        valid_mask_prob: float = 0.15,
         leave_unmasked_prob: float = 0.1,
         random_token_prob: float = 0.1,
         split: str = 'valid',
         no_bos_eos: bool = False
     ):
         assert 0.0 < mask_prob < 1.0
+        assert 0.0 < valid_mask_prob < 1.0
         assert 0.0 <= random_token_prob <= 1.0
         assert 0.0 <= leave_unmasked_prob <= 1.0
         assert random_token_prob + leave_unmasked_prob <= 1.0
@@ -106,6 +108,7 @@ class MlmOtfDataset(FairseqDataset):
         self.tokens_per_sample = tokens_per_sample
         self.min_tokens_per_sample = min_tokens_per_sample
         self.mask_prob = mask_prob
+        self.valid_mask_prob = valid_mask_prob
         self.leave_unmasked_prob = leave_unmasked_prob
         self.random_token_prob = random_token_prob
 
@@ -159,6 +162,7 @@ class MlmOtfDataset(FairseqDataset):
 
         lengths = []
         cur_seed = (self.seed + self.epoch) if self.shuffle and self.split != 'valid' else 0
+        mask_prob = self.valid_mask_prob if self.split == 'valid' else self.mask_prob
 
         with data_utils.numpy_seed(cur_seed):
             for sample, tokened_sample in zip(samples, tokenized_samples.encodings):
@@ -179,7 +183,7 @@ class MlmOtfDataset(FairseqDataset):
                 src_ids_nomask = tokened_sample.ids
 
                 # sample word masks
-                num_masked_word = int(self.mask_prob * num_word + np.random.rand())
+                num_masked_word = int(mask_prob * num_word + np.random.rand())
                 masked_word_idx = sorted(np.random.choice(num_word, num_masked_word, replace=False))
                 rand_or_unmask_prob = self.random_token_prob + self.leave_unmasked_prob
 

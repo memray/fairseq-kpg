@@ -1,11 +1,33 @@
-@SF
+# pretraining
 cd /export/share/ruimeng/project/te/fairseq-kpg
+source run/mlm/pretrain_BT_baseE11D1T8_mask95_unmask0_random0_16gpu_step1m_resume.sh
+source run/mlm/pretrain_BT_baseE11D1T8_mask95_unmask0_random0_16gpu_step1m.sh
+source run/mlm/pretrain_BT_baseE11D1T8_mask50_unmask0_random0_16gpu_step1m.sh
+source run/mlm/pretrain_BT_baseE11D1T4_mask50_unmask0_random0_16gpu_step1m.sh
+source run/mlm/pretrain_BT_baseE11D1T1_mask50_unmask0_random0_16gpu_step1m.sh
+source run/mlm/pretrain_BT_baseE11D1T1_maskprob05_16gpu_step1m.sh
+
+source run/mlm/pretrain_bottleneck_token_baseE12D3_maskprob015_16gpu_step1m_resume.sh
+source run/mlm/pretrain_bottleneck_token_baseE12D3_maskprob015_16gpu_step1m.sh
+source run/mlm/pretrain_bottleneck_token_baseE12D3_maskprob03_16gpu_step1m_resume.sh
+source run/mlm/pretrain_bottleneck_token_baseE12D3_maskprob03_16gpu_step1m.sh
+source run/mlm/pretrain_roberta_base_16gpu_step1m_resume.sh
+source run/mlm/pretrain_roberta_base_16gpu_step1m.sh
+source run/mlm/pretrain_roberta_base_8gpu.step100k.sh
+source run/mlm/pretrain_roberta_base_8gpu_step500k_resume.sh
 source run/mlm/pretrain_roberta_base_8gpu_step500k.sh
 source run/mlm/pretrain_bottleneck_attention_base_8gpu.sh
 source run/mlm/pretrain_bottleneck_token_base_8gpu.sh
 source run/mlm/pretrain_roberta_base_8gpu.sh
 
-
+# fairseq GLUE
+cd /export/share/ruimeng/project/te/fairseq-kpg/run/glue/
+mkdir /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32/
+# done: RTE MRPC STSB 1268541 1268542 1271645
+# todo: CoLA  SST-2 1275955 1275956 QQP QNLI 1336448 1336449
+source run_baseline_glue_g8.sh QQP /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.bs32/lr_0.00001/MNLI/seed_100/checkpoint_best.pt /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32 > /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32/QQP.nohup.out 2>&1 &
+source run_baseline_glue_g8.sh QNLI /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.bs32/lr_0.00001/MNLI/seed_100/checkpoint_best.pt /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32 > /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32/QNLI.nohup.out 2>&1 &
+source run_baseline_glue_g8.sh STS-B /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.bs32/lr_0.00001/MNLI/seed_100/checkpoint_best.pt /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32 > /export/home/exp/fairseq_glue/roberta_base.step1m.lr1e4.bs256.16gpu.step1m.fromMNLI.bs32/STS-B.nohup.out 2>&1 &
 
 
 ## Bart-MAG

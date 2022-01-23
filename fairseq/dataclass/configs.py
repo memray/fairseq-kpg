@@ -497,10 +497,14 @@ class DatasetConfig(FairseqDataclass):
     )
 
     validate_interval: int = field(
-        default=1, metadata={"help": "validate every N epochs"}
+        default=0, metadata={"help": "validate every N epochs"}
     )
     validate_interval_updates: int = field(
         default=0, metadata={"help": "validate every N updates"}
+    )
+    validate_interval_ratio: float = field(
+        default=0, metadata={"help": "a ratio r_val in range (0,1), "
+                                     "to validate every r_val*total_updates updates."}
     )
     validate_after_updates: int = field(
         default=0, metadata={"help": "dont validate until reaching this many updates"}

@@ -654,10 +654,11 @@ class Trainer(object):
         self.reset_dummy_batch(batch_iterator.first_batch)
         return batch_iterator
 
+
     def get_valid_iterator(
         self,
         subset,
-        disable_iterator_cache=False,
+        disable_iterator_cache=True,
     ):
         """Return an EpochBatchIterator over given validation subset for a given epoch."""
         batch_iterator = self.task.get_batch_iterator(

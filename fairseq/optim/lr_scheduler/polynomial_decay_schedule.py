@@ -17,6 +17,9 @@ class PolynomialDecayLRScheduleConfig(FairseqDataclass):
         default=0,
         metadata={"help": "warmup the learning rate linearly for the first N updates"},
     )
+    warmup_ratio: float = field(
+        default=0, metadata={"help": "warmup ratio for model to broadcast"}
+    )
     force_anneal: Optional[int] = field(
         default=None,
         metadata={"help": "force annealing at specified epoch"},
@@ -46,8 +49,14 @@ class PolynomialDecayLRSchedule(FairseqLRScheduler):
         assert cfg.total_num_update > 0
 
         self.lr = cfg.lr[0]
+        assert cfg.warmup_updates * cfg.warmup_ratio == 0, \
+            "warmup_updates and warmup_ratio cannot be non-zero at the same time"
         if cfg.warmup_updates > 0:
             self.warmup_factor = 1.0 / cfg.warmup_updates
+        else:
+            self.warmup_factor = 1
+        if cfg.warmup_ratio > 0:
+            self.warmup_factor = 1.0 / int(cfg.total_num_update * cfg.warmup_ratio)
         else:
             self.warmup_factor = 1
         self.end_learning_rate = cfg.end_learning_rate

@@ -194,26 +194,6 @@ class BottleneckBERTModel(FairseqEncoderDecoderModel):
             help="Specify method to fuse decoder inputs and encoding from bottleneck encoder",
         )
 
-    def load_state_dict(
-        self,
-        state_dict,
-        strict=True,
-        model_cfg = None,
-        args = None,
-    ):
-        """Copies parameters and buffers from *state_dict* into this module and
-        its descendants.
-
-        Overrides the method in :class:`nn.Module`. Compared with that method
-        this additionally "upgrades" *state_dicts* from old checkpoints.
-
-        TODO: @memray not working yet
-        """
-        self.upgrade_state_dict(state_dict)
-        # rename keys of parameters
-        new_state_dict = prune_state_dict(state_dict, model_cfg)
-        return super().load_state_dict(new_state_dict, strict=False)
-
     @classmethod
     def build_model(cls, args, task):
         """Build a new model instance."""
@@ -317,72 +297,11 @@ class BottleneckBERTModel(FairseqEncoderDecoderModel):
         logger.info(x["args"])
         return BottleneckBERTHubInterface(x["args"], x["task"], x["models"][0])
 
+
     def upgrade_state_dict_named(self, state_dict, name):
         prefix = name + "." if name != "" else ""
-
-        # rename decoder -> encoder before upgrading children modules
-        for k in list(state_dict.keys()):
-            if k.startswith(prefix + "decoder"):
-                new_k = prefix + "encoder" + k[len(prefix + "decoder") :]
-                state_dict[new_k] = state_dict[k]
-                del state_dict[k]
-
         # upgrade children modules
         super().upgrade_state_dict_named(state_dict, name)
-
-        # Handle new classification heads present in the state dict.
-        current_head_names = (
-            []
-            if not hasattr(self, "classification_heads")
-            else self.classification_heads.keys()
-        )
-        keys_to_delete = []
-        for k in state_dict.keys():
-            if not k.startswith(prefix + "classification_heads."):
-                continue
-
-            head_name = k[len(prefix + "classification_heads.") :].split(".")[0]
-            num_classes = state_dict[
-                prefix + "classification_heads." + head_name + ".out_proj.weight"
-            ].size(0)
-            inner_dim = state_dict[
-                prefix + "classification_heads." + head_name + ".dense.weight"
-            ].size(0)
-
-            if getattr(self.args, "load_checkpoint_heads", False):
-                if head_name not in current_head_names:
-                    self.register_classification_head(head_name, num_classes, inner_dim)
-            else:
-                if head_name not in current_head_names:
-                    logger.warning(
-                        "deleting classification head ({}) from checkpoint "
-                        "not present in current model: {}".format(head_name, k)
-                    )
-                    keys_to_delete.append(k)
-                elif (
-                    num_classes
-                    != self.classification_heads[head_name].out_proj.out_features
-                    or inner_dim
-                    != self.classification_heads[head_name].dense.out_features
-                ):
-                    logger.warning(
-                        "deleting classification head ({}) from checkpoint "
-                        "with different dimensions than current model: {}".format(
-                            head_name, k
-                        )
-                    )
-                    keys_to_delete.append(k)
-        for k in keys_to_delete:
-            del state_dict[k]
-
-        # Copy any newly-added classification heads into the state dict
-        # with their current weights.
-        if hasattr(self, "classification_heads"):
-            cur_state = self.classification_heads.state_dict()
-            for k, v in cur_state.items():
-                if prefix + "classification_heads." + k not in state_dict:
-                    logger.info("Overwriting " + prefix + "classification_heads." + k)
-                    state_dict[prefix + "classification_heads." + k] = v
 
 
 class BottleneckBERTLMHead(nn.Module):
@@ -652,6 +571,17 @@ def base_architecture(args):
 def bottleneck_bert_base_architecture(args):
     base_architecture(args)
 
+@register_model_architecture("bottleneck_bert", "bottleneck_bert_base_E11D1")
+def bottleneck_bert_base_architecture(args):
+    args.encoder_layers = getattr(args, "encoder_layers", 11)
+    args.decoder_layers = getattr(args, "decoder_layers", 1)
+    base_architecture(args)
+
+@register_model_architecture("bottleneck_bert", "bottleneck_bert_base_E12D3")
+def bottleneck_bert_base_architecture(args):
+    args.encoder_layers = getattr(args, "encoder_layers", 12)
+    args.decoder_layers = getattr(args, "decoder_layers", 3)
+    base_architecture(args)
 
 @register_model_architecture("bottleneck_bert", "bottleneck_bert_large")
 def bottleneck_bert_large_architecture(args):

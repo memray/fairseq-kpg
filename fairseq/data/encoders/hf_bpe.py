@@ -42,7 +42,7 @@ class HuggingFacePretrainedBPE(object):
         # hard-code <sep>
         sep_token = '<sep>'
         kp_special_tokens = ['<present>', '<absent>',
-                             '<category>', '<infill>', '<seealso>', '<header>',
+                             '<category>', '<infill>', '<seealso>', 'da<header>',
                              '<|endoftext|>', '<sep>', '<mask>',
                              '<mixed>', '<number>', '<phrase>']
 

@@ -8,6 +8,7 @@ Train a new model on one or across multiple GPUs.
 """
 
 import argparse
+import json
 import logging
 import math
 import os
@@ -284,6 +285,7 @@ def train(
     should_stop = False
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
+
     for i, samples in enumerate(progress):
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
@@ -297,6 +299,8 @@ def train(
             # print('\t', [l for s in samples for l in list(s['target'].shape)])
             # for s in samples: print(s['id'].numpy())
             log_output = trainer.train_step(samples)
+            # trainer.set_num_updates(trainer.get_num_updates() + 1)
+            # log_output = None
 
         if log_output is not None:  # not OOM, overflow, ...
             # log mid-epoch stats
@@ -388,26 +392,55 @@ def validate_and_save(
         # @memray disable end-of-epoch validation
         # (not end_of_epoch and do_save)  # validate during mid-epoch saves
         # or (end_of_epoch and epoch_itr.epoch % cfg.dataset.validate_interval == 0)
-        # or should_stop
-        # or (
-        (
+        (cfg.dataset.validate_interval > 0 and epoch_itr.epoch % cfg.dataset.validate_interval == 0)
+        or should_stop
+        or (
             cfg.dataset.validate_interval_updates > 0
             and num_updates > 0
             and num_updates % cfg.dataset.validate_interval_updates == 0
+        ) or (
+            # validate_interval_ratio can be a ratio between 0 and 1
+            cfg.dataset.validate_interval_ratio > 0
+            and num_updates > 0
+            and num_updates % int(max_update * cfg.dataset.validate_interval_ratio) == 0
         )
     ) and not cfg.dataset.disable_validation and num_updates >= cfg.dataset.validate_after_updates
 
     # Validate
-    valid_losses = [None]
+    valid_losses, stats_list = [None], []
     if do_validate:
-        valid_losses = validate(cfg, trainer, task, epoch_itr, valid_subsets)
+        valid_losses, stats_list = validate(cfg, trainer, task, epoch_itr, valid_subsets)
+        # write stats to a json file
+        for stat_idx, stats in enumerate(stats_list):
+            stats = dict(stats)
+            for k in stats.keys():
+                if isinstance(stats[k], torch.Tensor):
+                    stats[k] = stats[k].item()
+            stats['epoch'] = epoch_itr.epoch
+            stats['step'] = num_updates
+            stats['eval_loss'] = stats['loss']
+            if cfg.checkpoint.best_checkpoint_metric == 'accuracy':
+                stats['eval_accuracy'] = stats['accuracy'] / 100.0
+            elif cfg.checkpoint.best_checkpoint_metric == 'mcc':
+                stats['eval_matthews_correlation'] = stats['mcc'] / 100.0
+            elif cfg.checkpoint.best_checkpoint_metric == 'pearson_spearman':
+                stats['eval_pearson'] = stats['pearson'] / 100.0
+                stats['eval_spearmanr'] = stats['spearman'] / 100.0
+            save_json_path = os.path.join(cfg.checkpoint.save_dir, "eval_output_valid%d" % stat_idx,
+                                          "dev_epoch-{}_step-{}.json".format(epoch_itr.epoch, num_updates))
+            save_json_dir = os.path.dirname(save_json_path)
+            if trainer.data_parallel_rank == 0:
+                os.makedirs(save_json_dir, exist_ok=True)
+                with open(save_json_path, 'w') as eval_json:
+                    eval_json.write(json.dumps(stats))
+            stats_list[stat_idx] = stats
 
     should_stop |= should_stop_early(cfg, valid_losses[0])
 
     # Save checkpoint
-    if do_save or should_stop:
+    if do_save or should_stop or do_validate:
         checkpoint_utils.save_checkpoint(
-            cfg.checkpoint, trainer, epoch_itr, valid_losses[0]
+            cfg.checkpoint, trainer, epoch_itr, valid_losses[0], stats_list
         )
 
     return valid_losses, should_stop
@@ -432,7 +465,7 @@ def validate(
         utils.set_torch_seed(cfg.dataset.fixed_validation_seed)
 
     trainer.begin_valid_epoch(epoch_itr.epoch)
-    valid_losses = []
+    valid_losses, stats_list = [], []
     for subset in subsets:
         logger.info('begin validation on "{}" subset'.format(subset))
 
@@ -470,18 +503,25 @@ def validate(
             for i, sample in enumerate(progress):
                 if cfg.dataset.max_valid_steps is not None and i > cfg.dataset.max_valid_steps:
                     break
-                trainer.valid_step(sample)
+                log_output = trainer.valid_step(sample)
+
+                if log_output is not None:  # not OOM, overflow, ...
+                    # log mid-epoch stats
+                    if i % cfg.common.log_interval == 0:
+                        stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
+                        progress.log(stats, tag="valid_inner", step=i)
 
         # log validation stats
         stats = get_valid_stats(cfg, trainer, agg.get_smoothed_values())
+        stats_list.append(stats)
 
         if hasattr(task, "post_validate"):
             task.post_validate(trainer.get_model(), stats, agg)
 
-        progress.print(stats, tag=subset, step=trainer.get_num_updates())
+        progress.log(stats, tag=subset, step=trainer.get_num_updates())
 
         valid_losses.append(stats[cfg.checkpoint.best_checkpoint_metric])
-    return valid_losses
+    return valid_losses, stats_list
 
 
 def get_valid_stats(

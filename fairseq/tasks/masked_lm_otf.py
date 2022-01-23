@@ -8,6 +8,8 @@ import os
 import re
 
 import numpy as np
+import tqdm
+
 from fairseq.data.encoders.hf_bpe import HuggingFacePretrainedBPE
 
 from fairseq import utils
@@ -43,6 +45,8 @@ class MlmOtfTask(LegacyFairseqTask):
             help="colon separated path to data directories list, \
                             will be iterated upon during epochs in round-robin manner",
         )
+        parser.add_argument("--load-all-data", action="store_true",
+                            help='Load all training data at once rather than each folder an epoch.')
         parser.add_argument("--valid-data", type=str,
                             help='directory of valid data.')
         parser.add_argument("--no-bos-eos", action="store_true",
@@ -75,6 +79,12 @@ class MlmOtfTask(LegacyFairseqTask):
             help="probability of replacing a token with mask",
         )
         parser.add_argument(
+            "--valid-mask-prob",
+            default=0.15,
+            type=float,
+            help="probability of replacing a token with mask during validation",
+        )
+        parser.add_argument(
             "--leave-unmasked-prob",
             default=0.1,
             type=float,
@@ -91,12 +101,14 @@ class MlmOtfTask(LegacyFairseqTask):
     def __init__(self, args):
         super().__init__(args)
         self.text_field = args.text_field
+        self.load_all_data = args.load_all_data
         self.no_bos_eos = args.no_bos_eos
         self.seed = args.seed
 
         self.min_tokens_per_sample = args.min_tokens_per_sample
         self.tokens_per_sample = args.tokens_per_sample
         self.mask_prob = args.mask_prob
+        self.valid_mask_prob = args.valid_mask_prob
         self.leave_unmasked_prob = args.leave_unmasked_prob
         self.random_token_prob = args.random_token_prob
 
@@ -138,7 +150,11 @@ class MlmOtfTask(LegacyFairseqTask):
             subdir_paths = sorted([os.path.join(path, subdir) for path in subdir_paths for subdir in os.listdir(path)])
             with data_utils.numpy_seed(self.seed):
                 np.random.shuffle(subdir_paths)
-            subdir_paths = [subdir_paths[(epoch - 1) % len(subdir_paths)]]
+            if not self.load_all_data:
+                subdir_paths = [subdir_paths[(epoch - 1) % len(subdir_paths)]]
+            logger.info('Start loading training shards from the following folders:')
+            for p in subdir_paths:
+                logger.info('\t' + p)
         elif split == 'valid':
             subdir_paths = utils.split_paths(self.args.valid_data)
         else:
@@ -158,11 +174,13 @@ class MlmOtfTask(LegacyFairseqTask):
                     filepath = os.path.join(root, file)
                     _data_files.append(filepath)
 
-            logger.info('Find {} shards at {}'.format(len(_data_files), subdir_path))
+            # _data_files = [_data_files[0]]
+            logger.info('Find {} {} shards at {}'.format(len(_data_files), split, subdir_path))
             data_files.extend(_data_files)
 
         data_files = sorted(data_files)
         raw_datasets = [RawTextDataset(filepath, text_field=self.text_field) for filepath in data_files]
+        # raw_datasets = [RawTextDataset(filepath, text_field=self.text_field) for filepath in tqdm.tqdm(data_files)]
         logger.info('[SPLIT-{}]: load {} shards and {} data examples at epoch {}.'.format(
             split, len(raw_datasets), sum([len(ds) for ds in raw_datasets]), epoch))
 
@@ -181,6 +199,7 @@ class MlmOtfTask(LegacyFairseqTask):
             tokens_per_sample=self.tokens_per_sample,
             min_tokens_per_sample=self.min_tokens_per_sample,
             mask_prob=self.mask_prob,
+            valid_mask_prob=self.valid_mask_prob,
             leave_unmasked_prob=self.leave_unmasked_prob,
             random_token_prob=self.random_token_prob,
             split=split,
@@ -222,3 +241,6 @@ class MlmOtfTask(LegacyFairseqTask):
     @property
     def target_dictionary(self):
         return self.dictionary
+
+    def has_sharded_data(self, split):
+        return True
